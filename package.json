@@ -1,7 +1,7 @@
 {
   "name": "jwt-oauth-cli",
-  "version": "0.1.0",
-  "description": "CLI to decode/inspect JWTs, build OAuth authorize URLs, and exchange authorization codes locally",
+  "version": "0.2.0",
+  "description": "CLI to decode/inspect JWTs and run local OAuth helpers (authorize URL, PKCE, code exchange, refresh)",
   "type": "module",
   "bin": {
     "jwt-oauth-cli": "./src/cli.js"
@@ -26,7 +26,8 @@
     "oauth",
     "cli",
     "oidc",
-    "authorization"
+    "authorization",
+    "pkce"
   ],
   "license": "MIT",
   "repository": {

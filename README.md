@@ -1,6 +1,7 @@
 # jwt-oauth-cli
 
-Node.js CLI (ESM) to decode and inspect JWTs, build OAuth 2.0 authorize URLs, and exchange authorization codes locally.
+Node.js CLI (ESM) to decode and inspect JWTs, build OAuth 2.0 authorize URLs,
+generate PKCE pairs, exchange authorization codes, and refresh tokens locally.
 
 Requires Node.js 20+.
 
@@ -46,7 +47,7 @@ jwt-oauth-cli oauth authorize-url \
   --state xyz
 ```
 
-Optional PKCE:
+Optional PKCE (pair the challenge with values from `oauth pkce`):
 
 ```bash
 jwt-oauth-cli oauth authorize-url \
@@ -54,7 +55,22 @@ jwt-oauth-cli oauth authorize-url \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
   --code-challenge CHALLENGE \
-  --code-challenge-method S256
+  --code-challenge-method S256 \
+  --state STATE
+```
+
+### OAuth PKCE pair
+
+Generate a `code_verifier`, S256 `code_challenge`, and random `state`:
+
+```bash
+jwt-oauth-cli oauth pkce
+```
+
+Compact JSON:
+
+```bash
+jwt-oauth-cli oauth pkce --compact
 ```
 
 ### OAuth code exchange
@@ -83,10 +99,51 @@ jwt-oauth-cli oauth exchange \
   --code-verifier VERIFIER
 ```
 
+### OAuth refresh token
+
+Refresh an access token using the `refresh_token` grant. Client secret handling
+matches `oauth exchange` (env `JWT_OAUTH_CLIENT_SECRET` preferred; never logged).
+
+```bash
+export JWT_OAUTH_CLIENT_SECRET=your-secret
+jwt-oauth-cli oauth refresh \
+  --token-endpoint https://auth.example/token \
+  --refresh-token REFRESH_TOKEN \
+  --client-id my-client
+```
+
+Optional scope and compact output:
+
+```bash
+jwt-oauth-cli oauth refresh \
+  --token-endpoint https://auth.example/token \
+  --refresh-token REFRESH_TOKEN \
+  --client-id my-client \
+  --scope "openid profile" \
+  --compact
+```
+
 ## Library API
 
 ```js
-import { decode, inspect, buildAuthorizeUrl, exchangeCode } from 'jwt-oauth-cli';
+import {
+  decode,
+  inspect,
+  buildAuthorizeUrl,
+  exchangeCode,
+  generatePkce,
+  refreshToken,
+} from 'jwt-oauth-cli';
+
+const pkce = generatePkce();
+// { code_verifier, code_challenge, code_challenge_method: 'S256', state }
+
+const tokens = await refreshToken({
+  tokenEndpoint: 'https://auth.example/token',
+  refreshToken: '...',
+  clientId: 'my-client',
+  clientSecret: process.env.JWT_OAUTH_CLIENT_SECRET,
+});
 ```
 
 JWT helpers use the [`jose`](https://github.com/panva/jose) package for decoding.

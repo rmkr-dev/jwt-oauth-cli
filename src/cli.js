@@ -2,16 +2,21 @@
 
 import { Command } from 'commander';
 import { decode, inspect } from './jwt.js';
-import { buildAuthorizeUrl, exchangeCode } from './oauth.js';
+import {
+  buildAuthorizeUrl,
+  exchangeCode,
+  generatePkce,
+  refreshToken,
+} from './oauth.js';
 
 const program = new Command();
 
 program
   .name('jwt-oauth-cli')
   .description(
-    'Decode/inspect JWTs, build OAuth authorize URLs, and exchange authorization codes locally'
+    'Decode/inspect JWTs and run local OAuth helpers (authorize URL, PKCE, code exchange, refresh)'
   )
-  .version('0.1.0');
+  .version('0.2.0');
 
 const jwtCmd = program.command('jwt').description('JWT utilities');
 
@@ -93,6 +98,25 @@ oauthCmd
   });
 
 oauthCmd
+  .command('pkce')
+  .description(
+    'Generate a PKCE code_verifier / code_challenge (S256) pair and random state'
+  )
+  .option('-c, --compact', 'Print compact single-line JSON', false)
+  .action((options) => {
+    try {
+      const result = generatePkce();
+      const json = options.compact
+        ? JSON.stringify(result)
+        : JSON.stringify(result, null, 2);
+      process.stdout.write(json + '\n');
+    } catch (err) {
+      console.error(err.message);
+      process.exitCode = 1;
+    }
+  });
+
+oauthCmd
   .command('exchange')
   .description(
     'Exchange an authorization code for tokens (POSTs to the token endpoint)'
@@ -123,7 +147,43 @@ oauthCmd
         grantType: options.grantType,
       });
 
-      // Avoid printing secrets if present under uncommon keys; only show response as-is.
+      const json = options.compact
+        ? JSON.stringify(result)
+        : JSON.stringify(result, null, 2);
+      process.stdout.write(json + '\n');
+    } catch (err) {
+      console.error(err.message);
+      process.exitCode = 1;
+    }
+  });
+
+oauthCmd
+  .command('refresh')
+  .description(
+    'Refresh tokens using a refresh_token grant (POSTs to the token endpoint)'
+  )
+  .requiredOption('--token-endpoint <url>', 'Token endpoint URL')
+  .requiredOption('--refresh-token <token>', 'Refresh token')
+  .requiredOption('--client-id <id>', 'OAuth client ID')
+  .option(
+    '--client-secret <secret>',
+    'Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)'
+  )
+  .option('--scope <scope>', 'Space-separated scopes (optional)')
+  .option('-c, --compact', 'Print compact single-line JSON', false)
+  .action(async (options) => {
+    try {
+      const clientSecret =
+        options.clientSecret || process.env.JWT_OAUTH_CLIENT_SECRET || undefined;
+
+      const result = await refreshToken({
+        tokenEndpoint: options.tokenEndpoint,
+        refreshToken: options.refreshToken,
+        clientId: options.clientId,
+        clientSecret,
+        scope: options.scope,
+      });
+
       const json = options.compact
         ? JSON.stringify(result)
         : JSON.stringify(result, null, 2);

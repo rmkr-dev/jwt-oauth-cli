@@ -1,21 +1,26 @@
 # jwt-oauth-cli
 
-Node.js CLI (ESM) to decode and inspect JWTs, build OAuth 2.0 authorize URLs,
-generate PKCE pairs, exchange authorization codes, and refresh tokens locally.
+Java CLI to decode and inspect JWTs, build OAuth 2.0 authorize URLs, generate
+PKCE pairs, exchange authorization codes, and refresh tokens locally.
 
-Requires Node.js 20+.
+Requires JDK 17+.
 
-## Install
+## Build
 
 ```bash
-npm install -g jwt-oauth-cli
+mvn -q package
 ```
 
-Or from a clone of this repository:
+The shaded jar is written to `target/jwt-oauth-cli-0.2.0.jar`.
 
 ```bash
-npm install
-npm link
+java -jar target/jwt-oauth-cli-0.2.0.jar --help
+```
+
+Optional install-style alias:
+
+```bash
+alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.2.0.jar'
 ```
 
 ## Usage
@@ -25,7 +30,7 @@ npm link
 Decode header and payload (no signature verification):
 
 ```bash
-jwt-oauth-cli jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
+java -jar target/jwt-oauth-cli-0.2.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
 ```
 
 ### JWT inspect
@@ -33,13 +38,13 @@ jwt-oauth-cli jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
 Summarize claims and expiration:
 
 ```bash
-jwt-oauth-cli jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
+java -jar target/jwt-oauth-cli-0.2.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
 ```
 
 ### OAuth authorize URL
 
 ```bash
-jwt-oauth-cli oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -50,7 +55,7 @@ jwt-oauth-cli oauth authorize-url \
 Optional PKCE (pair the challenge with values from `oauth pkce`):
 
 ```bash
-jwt-oauth-cli oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -64,13 +69,13 @@ jwt-oauth-cli oauth authorize-url \
 Generate a `code_verifier`, S256 `code_challenge`, and random `state`:
 
 ```bash
-jwt-oauth-cli oauth pkce
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth pkce
 ```
 
 Compact JSON:
 
 ```bash
-jwt-oauth-cli oauth pkce --compact
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth pkce --compact
 ```
 
 ### OAuth code exchange
@@ -81,7 +86,7 @@ the `JWT_OAUTH_CLIENT_SECRET` environment variable rather than the CLI flag.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-jwt-oauth-cli oauth exchange \
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -91,7 +96,7 @@ jwt-oauth-cli oauth exchange \
 With PKCE verifier:
 
 ```bash
-jwt-oauth-cli oauth exchange \
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -106,7 +111,7 @@ matches `oauth exchange` (env `JWT_OAUTH_CLIENT_SECRET` preferred; never logged)
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-jwt-oauth-cli oauth refresh \
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client
@@ -115,7 +120,7 @@ jwt-oauth-cli oauth refresh \
 Optional scope and compact output:
 
 ```bash
-jwt-oauth-cli oauth refresh \
+java -jar target/jwt-oauth-cli-0.2.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client \
@@ -125,47 +130,35 @@ jwt-oauth-cli oauth refresh \
 
 ## Library API
 
-```js
-import {
-  decode,
-  inspect,
-  buildAuthorizeUrl,
-  exchangeCode,
-  generatePkce,
-  refreshToken,
-} from 'jwt-oauth-cli';
+Core helpers live under `dev.rmkr.jwtoauthcli`:
 
-const pkce = generatePkce();
-// { code_verifier, code_challenge, code_challenge_method: 'S256', state }
+- `jwt.JwtSupport.decode(token)` / `inspect(token)` / `inspect(token, nowSec)`
+- `oauth.OauthSupport.buildAuthorizeUrl(params)`
+- `oauth.OauthSupport.generatePkce()` / `generatePkce(verifierBytes)`
+- `oauth.OauthSupport.exchangeCode(params)` / `exchangeCode(params, formPoster)`
+- `oauth.OauthSupport.refreshToken(params)` / `refreshToken(params, formPoster)`
 
-const tokens = await refreshToken({
-  tokenEndpoint: 'https://auth.example/token',
-  refreshToken: '...',
-  clientId: 'my-client',
-  clientSecret: process.env.JWT_OAUTH_CLIENT_SECRET,
-});
-```
-
-JWT helpers use the [`jose`](https://github.com/panva/jose) package for decoding.
-Signature verification is intentionally out of scope for this CLI.
+JWT helpers use [Nimbus JOSE+JWT](https://connect2id.com/products/nimbus-jose-jwt).
+Signature verification is intentionally out of scope for this CLI. Token HTTP
+calls use `java.net.http.HttpClient` via `http.FormPoster` (injectable in tests).
 
 ## Development
 
 ```bash
-npm install
-npm run lint
-npm test
+mvn test
+mvn package
 ```
 
-## Extending the CLI (Copilot / Claude Code / Codex)
+## Extending the CLI
 
 When adding commands or flags:
 
-1. Put reusable logic in `src/jwt.js` or `src/oauth.js` and export from `src/index.js`.
-2. Wire the command in `src/cli.js` with Commander (subcommand under `jwt` or `oauth`).
-3. Add `node:test` coverage under `test/` for URL/body construction and claim parsing.
-4. Keep defaults conservative: no hardcoded IdP hosts, no logging of secrets or tokens, POST form bodies for token requests.
-5. Prefer `jose` for any new JWT work; document any temporary fallback clearly in code comments and the README.
+1. Put reusable logic in `JwtSupport` or `OauthSupport`.
+2. Wire the command under `cli` with Picocli (subcommand of `jwt` or `oauth`).
+3. Add JUnit 5 coverage for URL/body construction and claim parsing.
+4. Keep defaults conservative: no hardcoded IdP hosts, no logging of secrets or
+   tokens, POST form bodies for token requests.
+5. Prefer Nimbus for any new JWT work; document any temporary fallback clearly.
 6. Update this README with a short usage example for each new command.
 
 ## License

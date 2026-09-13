@@ -1,7 +1,8 @@
 # jwt-oauth-cli
 
-Java CLI to decode and inspect JWTs, build OAuth 2.0 authorize URLs, generate
-PKCE pairs, exchange authorization codes, and refresh tokens locally.
+Java CLI to decode, inspect, and verify JWTs, build OAuth 2.0 authorize URLs,
+generate PKCE pairs, exchange authorization codes, refresh tokens, and request
+client-credentials tokens locally.
 
 Requires JDK 17+.
 
@@ -11,16 +12,16 @@ Requires JDK 17+.
 mvn -q package
 ```
 
-The shaded jar is written to `target/jwt-oauth-cli-0.2.0.jar`.
+The shaded jar is written to `target/jwt-oauth-cli-0.3.0.jar`.
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar --help
+java -jar target/jwt-oauth-cli-0.3.0.jar --help
 ```
 
 Optional install-style alias:
 
 ```bash
-alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.2.0.jar'
+alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.3.0.jar'
 ```
 
 ## Usage
@@ -30,7 +31,7 @@ alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.2.0.jar'
 Decode header and payload (no signature verification):
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
+java -jar target/jwt-oauth-cli-0.3.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
 ```
 
 ### JWT inspect
@@ -38,13 +39,42 @@ java -jar target/jwt-oauth-cli-0.2.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIi
 Summarize claims and expiration:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
+java -jar target/jwt-oauth-cli-0.3.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
 ```
+
+### JWT verify
+
+Verify a signature locally. Use an HMAC secret for HS256/HS384/HS512, or a JWKS
+URL for RS*/ES* (matched by `kid` and `alg`). Prefer
+`JWT_OAUTH_HMAC_SECRET` over `--secret`.
+
+HMAC:
+
+```bash
+export JWT_OAUTH_HMAC_SECRET=your-hmac-secret
+java -jar target/jwt-oauth-cli-0.3.0.jar jwt verify "$TOKEN" \
+  --iss https://issuer.example \
+  --aud api \
+  --exp-leeway-seconds 60
+```
+
+JWKS:
+
+```bash
+java -jar target/jwt-oauth-cli-0.3.0.jar jwt verify "$TOKEN" \
+  --jwks-url https://auth.example/.well-known/jwks.json \
+  --iss https://issuer.example \
+  --aud api \
+  --compact
+```
+
+Successful output includes `valid`, `header`, `payload`, `claimsChecked`, and
+`algorithm`. Failures print a clear error and exit non-zero.
 
 ### OAuth authorize URL
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -55,7 +85,7 @@ java -jar target/jwt-oauth-cli-0.2.0.jar oauth authorize-url \
 Optional PKCE (pair the challenge with values from `oauth pkce`):
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -69,13 +99,13 @@ java -jar target/jwt-oauth-cli-0.2.0.jar oauth authorize-url \
 Generate a `code_verifier`, S256 `code_challenge`, and random `state`:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth pkce
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth pkce
 ```
 
 Compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth pkce --compact
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth pkce --compact
 ```
 
 ### OAuth code exchange
@@ -86,7 +116,7 @@ the `JWT_OAUTH_CLIENT_SECRET` environment variable rather than the CLI flag.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth exchange \
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -96,7 +126,7 @@ java -jar target/jwt-oauth-cli-0.2.0.jar oauth exchange \
 With PKCE verifier:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth exchange \
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -111,7 +141,7 @@ matches `oauth exchange` (env `JWT_OAUTH_CLIENT_SECRET` preferred; never logged)
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth refresh \
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client
@@ -120,11 +150,33 @@ java -jar target/jwt-oauth-cli-0.2.0.jar oauth refresh \
 Optional scope and compact output:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.2.0.jar oauth refresh \
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client \
   --scope "openid profile" \
+  --compact
+```
+
+### OAuth client credentials
+
+Request an access token using the `client_credentials` grant. Prefer
+`JWT_OAUTH_CLIENT_SECRET` over `--client-secret`.
+
+```bash
+export JWT_OAUTH_CLIENT_SECRET=your-secret
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth client-credentials \
+  --token-endpoint https://auth.example/token \
+  --client-id my-client \
+  --scope "api.read"
+```
+
+Compact JSON:
+
+```bash
+java -jar target/jwt-oauth-cli-0.3.0.jar oauth client-credentials \
+  --token-endpoint https://auth.example/token \
+  --client-id my-client \
   --compact
 ```
 
@@ -133,14 +185,18 @@ java -jar target/jwt-oauth-cli-0.2.0.jar oauth refresh \
 Core helpers live under `dev.rmkr.jwtoauthcli`:
 
 - `jwt.JwtSupport.decode(token)` / `inspect(token)` / `inspect(token, nowSec)`
+- `jwt.JwtSupport.verify(token, options)` — HMAC (`secret`) or JWKS (`jwksUrl`);
+  optional `iss`, `aud`, `expLeewaySeconds`, injectable `jwksFetcher`
 - `oauth.OauthSupport.buildAuthorizeUrl(params)`
 - `oauth.OauthSupport.generatePkce()` / `generatePkce(verifierBytes)`
 - `oauth.OauthSupport.exchangeCode(params)` / `exchangeCode(params, formPoster)`
 - `oauth.OauthSupport.refreshToken(params)` / `refreshToken(params, formPoster)`
+- `oauth.OauthSupport.clientCredentials(params)` /
+  `clientCredentials(params, formPoster)`
 
 JWT helpers use [Nimbus JOSE+JWT](https://connect2id.com/products/nimbus-jose-jwt).
-Signature verification is intentionally out of scope for this CLI. Token HTTP
-calls use `java.net.http.HttpClient` via `http.FormPoster` (injectable in tests).
+Token HTTP calls use `java.net.http.HttpClient` via `http.FormPoster` (injectable
+in tests). JWKS fetches use `http.JwksFetcher` (also injectable).
 
 ## Development
 

@@ -9,7 +9,8 @@ import picocli.CommandLine.Command;
       OauthAuthorizeUrlCommand.class,
       OauthPkceCommand.class,
       OauthExchangeCommand.class,
-      OauthRefreshCommand.class
+      OauthRefreshCommand.class,
+      OauthClientCredentialsCommand.class
     })
 public class OauthCommands implements Runnable {
   @Override

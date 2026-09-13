@@ -211,6 +211,67 @@ class OauthSupportTest {
     assertTrue(ex.getMessage().contains("refreshToken"));
   }
 
+
+  @Test
+  void clientCredentialsPostsFormBodyAndReturnsJson() throws Exception {
+    List<Captured> calls = new ArrayList<>();
+    FormPoster poster =
+        (url, formBody, headers) -> {
+          calls.add(new Captured(url, formBody, headers));
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{\"access_token\":\"cc-atok\",\"token_type\":\"Bearer\",\"expires_in\":3600}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("clientId", "my-client");
+    params.put("clientSecret", "s3cret");
+    params.put("scope", "api.read");
+
+    Map<String, Object> result = OauthSupport.clientCredentials(params, poster);
+    assertEquals("cc-atok", result.get("access_token"));
+    assertEquals(1, calls.size());
+    assertEquals("https://auth.example/token", calls.get(0).url);
+    assertTrue(calls.get(0).headers.get("content-type").contains("application/x-www-form-urlencoded"));
+
+    Map<String, String> body = form(calls.get(0).formBody);
+    assertEquals("client_credentials", body.get("grant_type"));
+    assertEquals("my-client", body.get("client_id"));
+    assertEquals("s3cret", body.get("client_secret"));
+    assertEquals("api.read", body.get("scope"));
+  }
+
+  @Test
+  void clientCredentialsSurfacesErrors() {
+    FormPoster poster =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                401,
+                false,
+                "{\"error\":\"invalid_client\",\"error_description\":\"bad credentials\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("clientId", "c");
+    params.put("clientSecret", "bad");
+
+    Exception ex =
+        assertThrows(Exception.class, () -> OauthSupport.clientCredentials(params, poster));
+    assertTrue(ex.getMessage().contains("bad credentials"));
+  }
+
+  @Test
+  void clientCredentialsRequiresClientSecret() {
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("clientId", "c");
+    Exception ex =
+        assertThrows(Exception.class, () -> OauthSupport.clientCredentials(params));
+    assertTrue(ex.getMessage().contains("clientSecret"));
+  }
+
   private record Captured(String url, String formBody, Map<String, String> headers) {}
 
   private static Map<String, String> query(java.net.URI uri) {

@@ -19,7 +19,7 @@ import java.util.StringJoiner;
 
 /**
  * OAuth 2.0 helpers: authorize URL construction, local code exchange,
- * PKCE generation, and refresh-token grant.
+ * PKCE generation, refresh-token grant, and client-credentials grant.
  */
 public final class OauthSupport {
 
@@ -199,6 +199,31 @@ public final class OauthSupport {
     }
 
     return postToken(tokenEndpoint, body, poster, "Token refresh failed");
+  }
+
+
+  public static Map<String, Object> clientCredentials(Map<String, Object> params) throws Exception {
+    return clientCredentials(params, DEFAULT_POSTER);
+  }
+
+  public static Map<String, Object> clientCredentials(Map<String, Object> params, FormPoster poster)
+      throws Exception {
+    String tokenEndpoint = requireString(params, "tokenEndpoint");
+    String clientId = requireString(params, "clientId");
+    String clientSecret = requireString(params, "clientSecret");
+    Object scope = params.get("scope");
+
+    validateUrl(tokenEndpoint, "tokenEndpoint");
+
+    Map<String, String> body = new LinkedHashMap<>();
+    body.put("grant_type", "client_credentials");
+    body.put("client_id", clientId);
+    body.put("client_secret", clientSecret);
+    if (scope != null && !(scope instanceof String s && s.isEmpty())) {
+      body.put("scope", joinScope(scope));
+    }
+
+    return postToken(tokenEndpoint, body, poster, "Client credentials grant failed");
   }
 
   private static Map<String, Object> postToken(

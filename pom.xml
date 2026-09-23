@@ -6,11 +6,11 @@
 
   <groupId>dev.rmkr</groupId>
   <artifactId>jwt-oauth-cli</artifactId>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <packaging>jar</packaging>
 
   <name>jwt-oauth-cli</name>
-  <description>CLI to decode/inspect/verify JWTs and run local OAuth helpers (authorize URL, PKCE, code exchange, refresh, client-credentials)</description>
+  <description>CLI to decode/inspect/verify/sign JWTs and run local OAuth helpers (authorize URL, PKCE, code exchange, refresh, client-credentials, introspect, revoke)</description>
   <url>https://github.com/rmkr-dev/jwt-oauth-cli</url>
 
   <licenses>

@@ -19,7 +19,8 @@ import java.util.StringJoiner;
 
 /**
  * OAuth 2.0 helpers: authorize URL construction, local code exchange,
- * PKCE generation, refresh-token grant, and client-credentials grant.
+ * PKCE generation, refresh-token grant, client-credentials grant,
+ * token introspection (RFC 7662), and token revocation (RFC 7009).
  */
 public final class OauthSupport {
 
@@ -224,6 +225,101 @@ public final class OauthSupport {
     }
 
     return postToken(tokenEndpoint, body, poster, "Client credentials grant failed");
+  }
+
+
+  public static Map<String, Object> introspect(Map<String, Object> params) throws Exception {
+    return introspect(params, DEFAULT_POSTER);
+  }
+
+  /**
+   * RFC 7662 token introspection. POSTs form {@code token} (and optional
+   * {@code token_type_hint}) with client credentials to the introspection endpoint.
+   */
+  public static Map<String, Object> introspect(Map<String, Object> params, FormPoster poster)
+      throws Exception {
+    String endpoint = requireString(params, "introspectionEndpoint");
+    String token = requireString(params, "token");
+    String clientId = requireString(params, "clientId");
+    String clientSecret = asNullableString(params.get("clientSecret"));
+    String tokenTypeHint = asNullableString(params.get("tokenTypeHint"));
+
+    validateUrl(endpoint, "introspectionEndpoint");
+
+    Map<String, String> body = new LinkedHashMap<>();
+    body.put("token", token);
+    body.put("client_id", clientId);
+    if (clientSecret != null && !clientSecret.isEmpty()) {
+      body.put("client_secret", clientSecret);
+    }
+    if (tokenTypeHint != null && !tokenTypeHint.isEmpty()) {
+      body.put("token_type_hint", tokenTypeHint);
+    }
+
+    return postToken(endpoint, body, poster, "Token introspection failed");
+  }
+
+  public static Map<String, Object> revoke(Map<String, Object> params) throws Exception {
+    return revoke(params, DEFAULT_POSTER);
+  }
+
+  /**
+   * RFC 7009 token revocation. POSTs form {@code token} (and optional
+   * {@code token_type_hint}) with client credentials. HTTP 200/204 count as success.
+   */
+  public static Map<String, Object> revoke(Map<String, Object> params, FormPoster poster)
+      throws Exception {
+    String endpoint = requireString(params, "revocationEndpoint");
+    String token = requireString(params, "token");
+    String clientId = requireString(params, "clientId");
+    String clientSecret = asNullableString(params.get("clientSecret"));
+    String tokenTypeHint = asNullableString(params.get("tokenTypeHint"));
+
+    validateUrl(endpoint, "revocationEndpoint");
+
+    Map<String, String> body = new LinkedHashMap<>();
+    body.put("token", token);
+    body.put("client_id", clientId);
+    if (clientSecret != null && !clientSecret.isEmpty()) {
+      body.put("client_secret", clientSecret);
+    }
+    if (tokenTypeHint != null && !tokenTypeHint.isEmpty()) {
+      body.put("token_type_hint", tokenTypeHint);
+    }
+
+    String form = encodeForm(body);
+    Map<String, String> headers = new LinkedHashMap<>();
+    headers.put("content-type", "application/x-www-form-urlencoded");
+    headers.put("accept", "application/json");
+
+    FormPoster.HttpResponse response = poster.post(endpoint, form, headers);
+    int status = response.status();
+    if (status != 200 && status != 204) {
+      String text = response.body() == null ? "" : response.body();
+      String errMsg = "HTTP " + status;
+      if (!text.isBlank()) {
+        try {
+          Map<String, Object> data =
+              MAPPER.readValue(text, new TypeReference<LinkedHashMap<String, Object>>() {});
+          Object desc = data.get("error_description");
+          Object err = data.get("error");
+          if (desc != null) {
+            errMsg = String.valueOf(desc);
+          } else if (err != null) {
+            errMsg = String.valueOf(err);
+          }
+        } catch (Exception ignored) {
+          String snippet = text.length() > 200 ? text.substring(0, 200) : text;
+          errMsg = snippet;
+        }
+      }
+      throw new IllegalStateException("Token revocation failed: " + errMsg);
+    }
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("revoked", true);
+    result.put("status", status);
+    return result;
   }
 
   private static Map<String, Object> postToken(

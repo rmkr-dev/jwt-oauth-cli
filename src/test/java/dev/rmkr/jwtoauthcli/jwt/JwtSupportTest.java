@@ -306,4 +306,90 @@ class JwtSupportTest {
         assertThrows(IllegalArgumentException.class, () -> JwtSupport.verify(token, options));
     assertTrue(ex.getMessage().contains("Issuer"));
   }
+  @Test
+  void signRoundTripVerifySucceeds() {
+    long now = 1_700_000_000L;
+    Map<String, Object> options = new LinkedHashMap<>();
+    options.put("secret", HMAC_SECRET);
+    options.put("alg", "HS256");
+    options.put("sub", "signer");
+    options.put("iss", "https://issuer.example");
+    options.put("aud", List.of("api", "admin"));
+    options.put("expSeconds", 600L);
+    options.put("iat", true);
+    options.put("nbfSeconds", 0L);
+    options.put("jti", "fixed-jti-1");
+    options.put("kid", "local-1");
+    options.put("nowSec", now);
+    Map<String, Object> custom = new LinkedHashMap<>();
+    custom.put("role", "admin");
+    custom.put("count", 3L);
+    custom.put("active", true);
+    options.put("claims", custom);
+
+    Map<String, Object> signed = JwtSupport.sign(options);
+    assertNotNull(signed.get("token"));
+    @SuppressWarnings("unchecked")
+    Map<String, Object> header = (Map<String, Object>) signed.get("header");
+    assertEquals("HS256", header.get("alg"));
+    assertEquals("local-1", header.get("kid"));
+    @SuppressWarnings("unchecked")
+    Map<String, Object> payload = (Map<String, Object>) signed.get("payload");
+    assertEquals("signer", payload.get("sub"));
+    assertEquals("fixed-jti-1", payload.get("jti"));
+    assertEquals("admin", payload.get("role"));
+
+    Map<String, Object> verifyOpts = new LinkedHashMap<>();
+    verifyOpts.put("secret", HMAC_SECRET);
+    verifyOpts.put("iss", "https://issuer.example");
+    verifyOpts.put("aud", "api");
+    verifyOpts.put("nowSec", now);
+    Map<String, Object> verified = JwtSupport.verify((String) signed.get("token"), verifyOpts);
+    assertEquals(true, verified.get("valid"));
+    assertEquals("HS256", verified.get("algorithm"));
+  }
+
+  @Test
+  void signRejectsMissingSecret() {
+    IllegalArgumentException ex =
+        assertThrows(IllegalArgumentException.class, () -> JwtSupport.sign(Map.of("sub", "x")));
+    assertTrue(ex.getMessage().toLowerCase().contains("secret"));
+  }
+
+  @Test
+  void signRejectsNonHmacAlgorithm() {
+    Map<String, Object> options = new LinkedHashMap<>();
+    options.put("secret", HMAC_SECRET);
+    options.put("alg", "RS256");
+    IllegalArgumentException ex =
+        assertThrows(IllegalArgumentException.class, () -> JwtSupport.sign(options));
+    assertTrue(ex.getMessage().contains("HS256") || ex.getMessage().contains("Unsupported"));
+  }
+
+  @Test
+  void signSupportsHs512AndJtiRandom() {
+    // HS512 requires a >= 64-byte secret under Nimbus MACSigner constraints.
+    String hs512Secret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    Map<String, Object> options = new LinkedHashMap<>();
+    options.put("secret", hs512Secret);
+    options.put("alg", "HS512");
+    options.put("sub", "u");
+    options.put("jtiRandom", true);
+    options.put("iat", false);
+    options.put("expSeconds", 120L);
+    Map<String, Object> signed = JwtSupport.sign(options);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> header = (Map<String, Object>) signed.get("header");
+    assertEquals("HS512", header.get("alg"));
+    @SuppressWarnings("unchecked")
+    Map<String, Object> payload = (Map<String, Object>) signed.get("payload");
+    assertNotNull(payload.get("jti"));
+    assertFalse(payload.containsKey("iat"));
+
+    Map<String, Object> verified =
+        JwtSupport.verify((String) signed.get("token"), Map.of("secret", hs512Secret));
+    assertEquals(true, verified.get("valid"));
+  }
+
+
 }

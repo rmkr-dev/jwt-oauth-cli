@@ -6,6 +6,7 @@ import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.JWSVerifier;
 import com.nimbusds.jose.crypto.ECDSAVerifier;
+import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jose.crypto.MACVerifier;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
 import com.nimbusds.jose.jwk.ECKey;
@@ -24,14 +25,19 @@ import dev.rmkr.jwtoauthcli.http.JwksFetcher;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
- * JWT decode, inspect, and verify helpers.
+ * JWT decode, inspect, verify, and sign helpers.
  * Uses Nimbus JOSE+JWT for header/claims parsing and signature verification
- * (HMAC via shared secret, or RS/ES algorithms via JWKS).
+ * (HMAC via shared secret, or RS/ES algorithms via JWKS). HMAC signing for
+ * local test tokens.
  */
 public final class JwtSupport {
 
@@ -257,6 +263,204 @@ public final class JwtSupport {
     result.put("claimsChecked", claimsChecked);
     result.put("algorithm", alg.getName());
     return result;
+  }
+
+
+  /**
+   * Create an HMAC-signed JWT for local testing.
+   *
+   * <p>Supported options (Map keys):
+   * <ul>
+   *   <li>{@code secret} - HMAC shared secret (required)</li>
+   *   <li>{@code alg} - HS256 (default), HS384, or HS512</li>
+   *   <li>{@code sub}, {@code iss}, {@code aud} - standard claims ({@code aud} may be String or Collection)</li>
+   *   <li>{@code expSeconds} - TTL from now (default 3600); ignored if {@code exp} is set</li>
+   *   <li>{@code iat} - include iat now (default true); Boolean or omit</li>
+   *   <li>{@code nbfSeconds} - nbf offset from now (optional)</li>
+   *   <li>{@code jti} - JWT ID; or {@code jtiRandom}=true to generate</li>
+   *   <li>{@code kid} - optional header key id</li>
+   *   <li>{@code claims} - Map of extra custom claims</li>
+   *   <li>{@code nowSec} - evaluation time override for tests</li>
+   * </ul>
+   *
+   * @return map with {@code token}, {@code header}, {@code payload}
+   */
+  public static Map<String, Object> sign(Map<String, Object> claimsOrOptions) {
+    Map<String, Object> opts = claimsOrOptions != null ? claimsOrOptions : Map.of();
+
+    String secret = asNullableString(opts.get("secret"));
+    if (secret == null || secret.isEmpty()) {
+      throw new IllegalArgumentException(
+          "secret is required (pass --secret or set JWT_OAUTH_HMAC_SECRET)");
+    }
+
+    String algName = asNullableString(opts.get("alg"));
+    if (algName == null || algName.isEmpty()) {
+      algName = "HS256";
+    }
+    JWSAlgorithm alg = JWSAlgorithm.parse(algName);
+    if (!JWSAlgorithm.Family.HMAC_SHA.contains(alg)) {
+      throw new IllegalArgumentException(
+          "Unsupported signing algorithm: " + algName + " (expected HS256/HS384/HS512)");
+    }
+
+    Long nowSec = asLong(opts.get("nowSec"));
+    long now = nowSec != null ? nowSec : Instant.now().getEpochSecond();
+
+    JWTClaimsSet.Builder builder = new JWTClaimsSet.Builder();
+
+    String sub = asNullableString(opts.get("sub"));
+    if (sub != null && !sub.isEmpty()) {
+      builder.subject(sub);
+    }
+    String iss = asNullableString(opts.get("iss"));
+    if (iss != null && !iss.isEmpty()) {
+      builder.issuer(iss);
+    }
+
+    Object audRaw = opts.get("aud");
+    if (audRaw != null) {
+      List<String> audiences = normalizeAudience(audRaw);
+      if (!audiences.isEmpty()) {
+        builder.audience(audiences);
+      }
+    }
+
+    boolean includeIat = true;
+    Object iatOpt = opts.get("iat");
+    if (iatOpt instanceof Boolean b) {
+      includeIat = b;
+    } else if (iatOpt instanceof String s) {
+      includeIat = !"false".equalsIgnoreCase(s) && !"0".equals(s);
+    }
+    if (includeIat) {
+      builder.issueTime(new Date(now * 1000L));
+    }
+
+    long expSeconds = 3600L;
+    Object expSecRaw = opts.get("expSeconds");
+    if (expSecRaw instanceof Number n) {
+      expSeconds = n.longValue();
+    } else if (expSecRaw instanceof String s && !s.isEmpty()) {
+      try {
+        expSeconds = Long.parseLong(s);
+      } catch (NumberFormatException e) {
+        throw new IllegalArgumentException("expSeconds must be a number", e);
+      }
+    }
+    if (opts.get("exp") instanceof Number n) {
+      builder.expirationTime(new Date(n.longValue() * 1000L));
+    } else {
+      builder.expirationTime(new Date((now + expSeconds) * 1000L));
+    }
+
+    Object nbfSecRaw = opts.get("nbfSeconds");
+    if (nbfSecRaw != null) {
+      long nbfOffset;
+      if (nbfSecRaw instanceof Number n) {
+        nbfOffset = n.longValue();
+      } else if (nbfSecRaw instanceof String s && !s.isEmpty()) {
+        try {
+          nbfOffset = Long.parseLong(s);
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException("nbfSeconds must be a number", e);
+        }
+      } else {
+        throw new IllegalArgumentException("nbfSeconds must be a number");
+      }
+      builder.notBeforeTime(new Date((now + nbfOffset) * 1000L));
+    }
+
+    String jti = asNullableString(opts.get("jti"));
+    boolean jtiRandom = false;
+    Object jtiRandomRaw = opts.get("jtiRandom");
+    if (jtiRandomRaw instanceof Boolean b) {
+      jtiRandom = b;
+    } else if (jtiRandomRaw instanceof String s) {
+      jtiRandom = "true".equalsIgnoreCase(s) || "1".equals(s);
+    }
+    if (jti != null && !jti.isEmpty()) {
+      builder.jwtID(jti);
+    } else if (jtiRandom) {
+      builder.jwtID(UUID.randomUUID().toString());
+    }
+
+    Object custom = opts.get("claims");
+    if (custom instanceof Map<?, ?> claimMap) {
+      for (Map.Entry<?, ?> e : claimMap.entrySet()) {
+        if (e.getKey() == null) {
+          continue;
+        }
+        String key = String.valueOf(e.getKey());
+        // Do not overwrite standard claims already set via dedicated options.
+        if (List.of("sub", "iss", "aud", "exp", "iat", "nbf", "jti").contains(key)) {
+          continue;
+        }
+        builder.claim(key, e.getValue());
+      }
+    }
+
+    JWTClaimsSet claims = builder.build();
+
+    JWSHeader.Builder headerBuilder = new JWSHeader.Builder(alg).type(com.nimbusds.jose.JOSEObjectType.JWT);
+    String kid = asNullableString(opts.get("kid"));
+    if (kid != null && !kid.isEmpty()) {
+      headerBuilder.keyID(kid);
+    }
+    JWSHeader header = headerBuilder.build();
+
+    byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+    int minBits =
+        alg.equals(JWSAlgorithm.HS256)
+            ? 256
+            : alg.equals(JWSAlgorithm.HS384) ? 384 : 512;
+    if (keyBytes.length * 8 < minBits) {
+      throw new IllegalArgumentException(
+          "HMAC secret too short for "
+              + alg.getName()
+              + ": need at least "
+              + (minBits / 8)
+              + " bytes, got "
+              + keyBytes.length);
+    }
+
+    SignedJWT signed = new SignedJWT(header, claims);
+    try {
+      signed.sign(new MACSigner(keyBytes));
+    } catch (JOSEException e) {
+      throw new IllegalArgumentException("Failed to sign JWT: " + e.getMessage(), e);
+    }
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("token", signed.serialize());
+    result.put("header", new LinkedHashMap<>(header.toJSONObject()));
+    result.put("payload", new LinkedHashMap<>(claims.toJSONObject()));
+    return result;
+  }
+
+  private static List<String> normalizeAudience(Object audRaw) {
+    List<String> audiences = new ArrayList<>();
+    if (audRaw instanceof Collection<?> c) {
+      for (Object o : c) {
+        if (o != null) {
+          String s = String.valueOf(o).trim();
+          if (!s.isEmpty()) {
+            audiences.add(s);
+          }
+        }
+      }
+    } else {
+      String s = String.valueOf(audRaw).trim();
+      if (!s.isEmpty()) {
+        for (String part : s.split(",")) {
+          String p = part.trim();
+          if (!p.isEmpty()) {
+            audiences.add(p);
+          }
+        }
+      }
+    }
+    return audiences;
   }
 
   private static JWSVerifier hmacVerifier(JWSAlgorithm alg, String secret) throws JOSEException {

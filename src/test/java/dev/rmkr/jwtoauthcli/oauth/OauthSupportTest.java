@@ -272,6 +272,127 @@ class OauthSupportTest {
     assertTrue(ex.getMessage().contains("clientSecret"));
   }
 
+  @Test
+  void introspectPostsFormBodyAndReturnsJson() throws Exception {
+    List<Captured> calls = new ArrayList<>();
+    FormPoster poster =
+        (url, formBody, headers) -> {
+          calls.add(new Captured(url, formBody, headers));
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{\"active\":true,\"scope\":\"openid\",\"client_id\":\"my-client\",\"username\":\"alice\"}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("introspectionEndpoint", "https://auth.example/introspect");
+    params.put("token", "access-tok");
+    params.put("clientId", "my-client");
+    params.put("clientSecret", "s3cret");
+    params.put("tokenTypeHint", "access_token");
+
+    Map<String, Object> result = OauthSupport.introspect(params, poster);
+    assertEquals(true, result.get("active"));
+    assertEquals("alice", result.get("username"));
+    assertEquals(1, calls.size());
+    assertEquals("https://auth.example/introspect", calls.get(0).url);
+    assertTrue(calls.get(0).headers.get("content-type").contains("application/x-www-form-urlencoded"));
+
+    Map<String, String> body = form(calls.get(0).formBody);
+    assertEquals("access-tok", body.get("token"));
+    assertEquals("my-client", body.get("client_id"));
+    assertEquals("s3cret", body.get("client_secret"));
+    assertEquals("access_token", body.get("token_type_hint"));
+  }
+
+  @Test
+  void introspectSurfacesErrors() {
+    FormPoster poster =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                401,
+                false,
+                "{\"error\":\"invalid_client\",\"error_description\":\"bad credentials\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("introspectionEndpoint", "https://auth.example/introspect");
+    params.put("token", "tok");
+    params.put("clientId", "c");
+    params.put("clientSecret", "bad");
+
+    Exception ex =
+        assertThrows(Exception.class, () -> OauthSupport.introspect(params, poster));
+    assertTrue(ex.getMessage().contains("bad credentials"));
+  }
+
+  @Test
+  void introspectRequiresToken() {
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("introspectionEndpoint", "https://auth.example/introspect");
+    params.put("clientId", "c");
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.introspect(params));
+    assertTrue(ex.getMessage().contains("token"));
+  }
+
+  @Test
+  void revokeTreats200AsSuccess() throws Exception {
+    List<Captured> calls = new ArrayList<>();
+    FormPoster poster =
+        (url, formBody, headers) -> {
+          calls.add(new Captured(url, formBody, headers));
+          return new FormPoster.HttpResponse(200, true, "");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("revocationEndpoint", "https://auth.example/revoke");
+    params.put("token", "refresh-tok");
+    params.put("clientId", "my-client");
+    params.put("clientSecret", "s3cret");
+    params.put("tokenTypeHint", "refresh_token");
+
+    Map<String, Object> result = OauthSupport.revoke(params, poster);
+    assertEquals(true, result.get("revoked"));
+    assertEquals(200, result.get("status"));
+    Map<String, String> body = form(calls.get(0).formBody);
+    assertEquals("refresh-tok", body.get("token"));
+    assertEquals("refresh_token", body.get("token_type_hint"));
+    assertEquals("my-client", body.get("client_id"));
+  }
+
+  @Test
+  void revokeTreats204AsSuccess() throws Exception {
+    FormPoster poster =
+        (url, formBody, headers) -> new FormPoster.HttpResponse(204, true, "");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("revocationEndpoint", "https://auth.example/revoke");
+    params.put("token", "atok");
+    params.put("clientId", "c");
+
+    Map<String, Object> result = OauthSupport.revoke(params, poster);
+    assertEquals(true, result.get("revoked"));
+    assertEquals(204, result.get("status"));
+  }
+
+  @Test
+  void revokeSurfacesErrors() {
+    FormPoster poster =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                400,
+                false,
+                "{\"error\":\"invalid_request\",\"error_description\":\"token missing\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("revocationEndpoint", "https://auth.example/revoke");
+    params.put("token", "tok");
+    params.put("clientId", "c");
+
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.revoke(params, poster));
+    assertTrue(ex.getMessage().contains("token missing"));
+  }
+
+
   private record Captured(String url, String formBody, Map<String, String> headers) {}
 
   private static Map<String, String> query(java.net.URI uri) {

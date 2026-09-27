@@ -20,7 +20,8 @@ import java.util.StringJoiner;
 /**
  * OAuth 2.0 helpers: authorize URL construction, local code exchange,
  * PKCE generation, refresh-token grant, client-credentials grant,
- * token introspection (RFC 7662), and token revocation (RFC 7009).
+ * device authorization grant (RFC 8628), token introspection (RFC 7662),
+ * and token revocation (RFC 7009).
  */
 public final class OauthSupport {
 
@@ -320,6 +321,162 @@ public final class OauthSupport {
     result.put("revoked", true);
     result.put("status", status);
     return result;
+  }
+
+  public static Map<String, Object> deviceAuthorization(Map<String, Object> params) throws Exception {
+    return deviceAuthorization(params, DEFAULT_POSTER);
+  }
+
+  /**
+   * RFC 8628 device authorization request. POSTs {@code client_id} and optional
+   * {@code scope} / {@code client_secret}. {@code interval} defaults to 5 when
+   * the authorization server omits it.
+   */
+  public static Map<String, Object> deviceAuthorization(
+      Map<String, Object> params, FormPoster poster) throws Exception {
+    String endpoint = requireString(params, "deviceAuthorizationEndpoint");
+    String clientId = requireString(params, "clientId");
+    String clientSecret = asNullableString(params.get("clientSecret"));
+    Object scope = params.get("scope");
+
+    validateUrl(endpoint, "deviceAuthorizationEndpoint");
+
+    Map<String, String> body = new LinkedHashMap<>();
+    body.put("client_id", clientId);
+    if (scope != null && !(scope instanceof String s && s.isEmpty())) {
+      body.put("scope", joinScope(scope));
+    }
+    if (clientSecret != null && !clientSecret.isEmpty()) {
+      body.put("client_secret", clientSecret);
+    }
+
+    Posted posted = postForm(endpoint, body, poster);
+    Map<String, Object> data = posted.data();
+    if (!posted.response().ok() || data.get("error") != null) {
+      throw new IllegalStateException(
+          "Device authorization failed: " + errorMessage(data, posted.response().status()));
+    }
+
+    Object deviceCode = data.get("device_code");
+    Object userCode = data.get("user_code");
+    Object verificationUri = data.get("verification_uri");
+    if (deviceCode == null || userCode == null || verificationUri == null) {
+      throw new IllegalStateException(
+          "Device authorization failed: response missing device_code, user_code, or verification_uri");
+    }
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("device_code", deviceCode);
+    result.put("user_code", userCode);
+    result.put("verification_uri", verificationUri);
+    result.put("expires_in", data.get("expires_in"));
+    Object interval = data.get("interval");
+    result.put("interval", interval == null ? 5 : interval);
+    Object complete = data.get("verification_uri_complete");
+    if (complete != null && !String.valueOf(complete).isEmpty()) {
+      result.put("verification_uri_complete", complete);
+    }
+    return result;
+  }
+
+  public static Map<String, Object> deviceToken(Map<String, Object> params) throws Exception {
+    return deviceToken(params, DEFAULT_POSTER);
+  }
+
+  /**
+   * RFC 8628 device access-token request. {@code authorization_pending} and
+   * {@code slow_down} are returned (not thrown) so callers can keep polling.
+   * For {@code slow_down}, {@code interval} is copied from the response when
+   * present; otherwise {@code interval_increase} is 5 (add that many seconds
+   * to the current poll interval). {@code expired_token}, {@code access_denied},
+   * and other errors are thrown.
+   */
+  public static Map<String, Object> deviceToken(Map<String, Object> params, FormPoster poster)
+      throws Exception {
+    String tokenEndpoint = requireString(params, "tokenEndpoint");
+    String deviceCode = requireString(params, "deviceCode");
+    String clientId = requireString(params, "clientId");
+    String clientSecret = asNullableString(params.get("clientSecret"));
+
+    validateUrl(tokenEndpoint, "tokenEndpoint");
+
+    Map<String, String> body = new LinkedHashMap<>();
+    body.put("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
+    body.put("device_code", deviceCode);
+    body.put("client_id", clientId);
+    if (clientSecret != null && !clientSecret.isEmpty()) {
+      body.put("client_secret", clientSecret);
+    }
+
+    Posted posted = postForm(tokenEndpoint, body, poster);
+    FormPoster.HttpResponse response = posted.response();
+    Map<String, Object> data = posted.data();
+
+    if ((response.status() == 200 || response.ok()) && data.get("access_token") != null) {
+      return data;
+    }
+
+    Object err = data.get("error");
+    String errCode = err == null ? null : String.valueOf(err);
+    if ("authorization_pending".equals(errCode) || "slow_down".equals(errCode)) {
+      Map<String, Object> pending = new LinkedHashMap<>();
+      pending.put("error", errCode);
+      Object desc = data.get("error_description");
+      if (desc != null) {
+        pending.put("error_description", String.valueOf(desc));
+      }
+      if ("slow_down".equals(errCode)) {
+        Object interval = data.get("interval");
+        if (interval != null) {
+          pending.put("interval", interval);
+        } else {
+          pending.put("interval_increase", 5);
+        }
+      }
+      return pending;
+    }
+
+    throw new IllegalStateException(
+        "Device token request failed: " + errorMessage(data, response.status()));
+  }
+
+  private record Posted(FormPoster.HttpResponse response, Map<String, Object> data) {}
+
+  private static Posted postForm(String url, Map<String, String> body, FormPoster poster)
+      throws Exception {
+    String form = encodeForm(body);
+    Map<String, String> headers = new LinkedHashMap<>();
+    headers.put("content-type", "application/x-www-form-urlencoded");
+    headers.put("accept", "application/json");
+
+    FormPoster.HttpResponse response = poster.post(url, form, headers);
+    String text = response.body() == null ? "" : response.body();
+
+    Map<String, Object> data;
+    try {
+      if (text.isBlank()) {
+        data = new LinkedHashMap<>();
+      } else {
+        data = MAPPER.readValue(text, new TypeReference<LinkedHashMap<String, Object>>() {});
+      }
+    } catch (Exception e) {
+      String snippet = text.length() > 200 ? text.substring(0, 200) : text;
+      throw new IllegalStateException(
+          "Token endpoint returned non-JSON (HTTP " + response.status() + "): " + snippet, e);
+    }
+    return new Posted(response, data);
+  }
+
+  private static String errorMessage(Map<String, Object> data, int status) {
+    Object desc = data.get("error_description");
+    Object err = data.get("error");
+    if (desc != null) {
+      return String.valueOf(desc);
+    }
+    if (err != null) {
+      return String.valueOf(err);
+    }
+    return "HTTP " + status;
   }
 
   private static Map<String, Object> postToken(

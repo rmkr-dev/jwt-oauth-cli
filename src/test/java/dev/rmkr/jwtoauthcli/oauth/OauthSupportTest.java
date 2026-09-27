@@ -392,6 +392,191 @@ class OauthSupportTest {
     assertTrue(ex.getMessage().contains("token missing"));
   }
 
+  @Test
+  void deviceAuthorizationPostsFormAndParsesResponse() throws Exception {
+    List<Captured> calls = new ArrayList<>();
+    FormPoster poster =
+        (url, formBody, headers) -> {
+          calls.add(new Captured(url, formBody, headers));
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{\"device_code\":\"dev-1\",\"user_code\":\"WDJB-MJHT\",\"verification_uri\":\"https://auth.example/device\",\"verification_uri_complete\":\"https://auth.example/device?user_code=WDJB-MJHT\",\"expires_in\":1800}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("deviceAuthorizationEndpoint", "https://auth.example/device");
+    params.put("clientId", "my-client");
+    params.put("clientSecret", "s3cret");
+    params.put("scope", List.of("openid", "profile"));
+
+    Map<String, Object> result = OauthSupport.deviceAuthorization(params, poster);
+    assertEquals("dev-1", result.get("device_code"));
+    assertEquals("WDJB-MJHT", result.get("user_code"));
+    assertEquals("https://auth.example/device", result.get("verification_uri"));
+    assertEquals(
+        "https://auth.example/device?user_code=WDJB-MJHT",
+        result.get("verification_uri_complete"));
+    assertEquals(1800, result.get("expires_in"));
+    assertEquals(5, result.get("interval"));
+    assertEquals(1, calls.size());
+    assertEquals("https://auth.example/device", calls.get(0).url);
+    assertTrue(calls.get(0).headers.get("content-type").contains("application/x-www-form-urlencoded"));
+
+    Map<String, String> body = form(calls.get(0).formBody);
+    assertEquals("my-client", body.get("client_id"));
+    assertEquals("s3cret", body.get("client_secret"));
+    assertEquals("openid profile", body.get("scope"));
+    assertFalse(body.containsKey("grant_type"));
+  }
+
+  @Test
+  void deviceAuthorizationKeepsServerInterval() throws Exception {
+    FormPoster poster =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                200,
+                true,
+                "{\"device_code\":\"dev-1\",\"user_code\":\"ABCD-EFGH\",\"verification_uri\":\"https://auth.example/device\",\"expires_in\":600,\"interval\":10}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("deviceAuthorizationEndpoint", "https://auth.example/device");
+    params.put("clientId", "my-client");
+
+    Map<String, Object> result = OauthSupport.deviceAuthorization(params, poster);
+    assertEquals(10, result.get("interval"));
+    assertFalse(result.containsKey("verification_uri_complete"));
+  }
+
+  @Test
+  void deviceAuthorizationSurfacesHttpErrors() {
+    FormPoster poster =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                400,
+                false,
+                "{\"error\":\"invalid_client\",\"error_description\":\"unknown client\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("deviceAuthorizationEndpoint", "https://auth.example/device");
+    params.put("clientId", "c");
+
+    Exception ex =
+        assertThrows(Exception.class, () -> OauthSupport.deviceAuthorization(params, poster));
+    assertTrue(ex.getMessage().contains("unknown client"));
+    assertTrue(ex.getMessage().contains("Device authorization failed"));
+  }
+
+  @Test
+  void deviceTokenReturnsTokens() throws Exception {
+    List<Captured> calls = new ArrayList<>();
+    FormPoster poster =
+        (url, formBody, headers) -> {
+          calls.add(new Captured(url, formBody, headers));
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{\"access_token\":\"atok\",\"token_type\":\"Bearer\",\"expires_in\":3600,\"refresh_token\":\"rtok\"}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("deviceCode", "dev-1");
+    params.put("clientId", "my-client");
+    params.put("clientSecret", "s3cret");
+
+    Map<String, Object> result = OauthSupport.deviceToken(params, poster);
+    assertEquals("atok", result.get("access_token"));
+    assertEquals("rtok", result.get("refresh_token"));
+    assertEquals(1, calls.size());
+    assertTrue(calls.get(0).headers.get("content-type").contains("application/x-www-form-urlencoded"));
+
+    Map<String, String> body = form(calls.get(0).formBody);
+    assertEquals("urn:ietf:params:oauth:grant-type:device_code", body.get("grant_type"));
+    assertEquals("dev-1", body.get("device_code"));
+    assertEquals("my-client", body.get("client_id"));
+    assertEquals("s3cret", body.get("client_secret"));
+  }
+
+  @Test
+  void deviceTokenAuthorizationPendingDoesNotThrow() throws Exception {
+    FormPoster poster =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                400,
+                false,
+                "{\"error\":\"authorization_pending\",\"error_description\":\"authorization pending\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("deviceCode", "dev-1");
+    params.put("clientId", "my-client");
+
+    Map<String, Object> result = OauthSupport.deviceToken(params, poster);
+    assertEquals("authorization_pending", result.get("error"));
+    assertEquals("authorization pending", result.get("error_description"));
+    assertFalse(result.containsKey("access_token"));
+    assertFalse(result.containsKey("interval_increase"));
+  }
+
+  @Test
+  void deviceTokenSlowDownDoesNotThrow() throws Exception {
+    FormPoster withInterval =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                400,
+                false,
+                "{\"error\":\"slow_down\",\"error_description\":\"slow down\",\"interval\":15}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("deviceCode", "dev-1");
+    params.put("clientId", "my-client");
+
+    Map<String, Object> hinted = OauthSupport.deviceToken(params, withInterval);
+    assertEquals("slow_down", hinted.get("error"));
+    assertEquals("slow down", hinted.get("error_description"));
+    assertEquals(15, hinted.get("interval"));
+    assertFalse(hinted.containsKey("interval_increase"));
+
+    FormPoster withoutInterval =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(400, false, "{\"error\":\"slow_down\"}");
+    Map<String, Object> bump = OauthSupport.deviceToken(params, withoutInterval);
+    assertEquals("slow_down", bump.get("error"));
+    assertFalse(bump.containsKey("error_description"));
+    assertFalse(bump.containsKey("interval"));
+    assertEquals(5, bump.get("interval_increase"));
+  }
+
+  @Test
+  void deviceTokenTerminalErrorsThrow() {
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("tokenEndpoint", "https://auth.example/token");
+    params.put("deviceCode", "dev-1");
+    params.put("clientId", "my-client");
+
+    FormPoster expired =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                400,
+                false,
+                "{\"error\":\"expired_token\",\"error_description\":\"device code expired\"}");
+    Exception expiredEx =
+        assertThrows(Exception.class, () -> OauthSupport.deviceToken(params, expired));
+    assertTrue(expiredEx.getMessage().contains("device code expired"));
+    assertTrue(expiredEx.getMessage().contains("Device token request failed"));
+
+    FormPoster denied =
+        (url, formBody, headers) ->
+            new FormPoster.HttpResponse(
+                400,
+                false,
+                "{\"error\":\"access_denied\",\"error_description\":\"user denied the request\"}");
+    Exception deniedEx =
+        assertThrows(Exception.class, () -> OauthSupport.deviceToken(params, denied));
+    assertTrue(deniedEx.getMessage().contains("user denied the request"));
+  }
 
   private record Captured(String url, String formBody, Map<String, String> headers) {}
 

@@ -2,7 +2,8 @@
 
 Java CLI to decode, inspect, verify, and sign JWTs, build OAuth 2.0 authorize
 URLs, generate PKCE pairs, exchange authorization codes, refresh tokens, request
-client-credentials tokens, introspect tokens, and revoke tokens locally.
+client-credentials tokens, run the device authorization grant, introspect
+tokens, and revoke tokens locally.
 
 Requires JDK 17+.
 
@@ -12,16 +13,16 @@ Requires JDK 17+.
 mvn -q package
 ```
 
-The shaded jar is written to `target/jwt-oauth-cli-0.4.0.jar`.
+The shaded jar is written to `target/jwt-oauth-cli-0.5.0.jar`.
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar --help
+java -jar target/jwt-oauth-cli-0.5.0.jar --help
 ```
 
 Optional install-style alias:
 
 ```bash
-alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.4.0.jar'
+alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.5.0.jar'
 ```
 
 ## Usage
@@ -31,7 +32,7 @@ alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.4.0.jar'
 Decode header and payload (no signature verification):
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
+java -jar target/jwt-oauth-cli-0.5.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
 ```
 
 ### JWT inspect
@@ -39,7 +40,7 @@ java -jar target/jwt-oauth-cli-0.4.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIi
 Summarize claims and expiration:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
+java -jar target/jwt-oauth-cli-0.5.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
 ```
 
 ### JWT verify
@@ -52,7 +53,7 @@ HMAC:
 
 ```bash
 export JWT_OAUTH_HMAC_SECRET=your-hmac-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar jwt verify "$TOKEN" \
+java -jar target/jwt-oauth-cli-0.5.0.jar jwt verify "$TOKEN" \
   --iss https://issuer.example \
   --aud api \
   --exp-leeway-seconds 60
@@ -61,7 +62,7 @@ java -jar target/jwt-oauth-cli-0.4.0.jar jwt verify "$TOKEN" \
 JWKS:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar jwt verify "$TOKEN" \
+java -jar target/jwt-oauth-cli-0.5.0.jar jwt verify "$TOKEN" \
   --jwks-url https://auth.example/.well-known/jwks.json \
   --iss https://issuer.example \
   --aud api \
@@ -80,7 +81,7 @@ HS512.
 
 ```bash
 export JWT_OAUTH_HMAC_SECRET=your-hmac-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar jwt sign \
+java -jar target/jwt-oauth-cli-0.5.0.jar jwt sign \
   --sub user-1 \
   --iss https://issuer.example \
   --aud api \
@@ -92,7 +93,7 @@ java -jar target/jwt-oauth-cli-0.4.0.jar jwt sign \
 Random `jti` and compact output:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar jwt sign \
+java -jar target/jwt-oauth-cli-0.5.0.jar jwt sign \
   --sub user-1 \
   --alg HS512 \
   --jti-random \
@@ -104,7 +105,7 @@ Successful output includes `token`, `header`, and `payload`.
 ### OAuth authorize URL
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -115,7 +116,7 @@ java -jar target/jwt-oauth-cli-0.4.0.jar oauth authorize-url \
 Optional PKCE (pair the challenge with values from `oauth pkce`):
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -129,13 +130,13 @@ java -jar target/jwt-oauth-cli-0.4.0.jar oauth authorize-url \
 Generate a `code_verifier`, S256 `code_challenge`, and random `state`:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth pkce
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth pkce
 ```
 
 Compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth pkce --compact
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth pkce --compact
 ```
 
 ### OAuth code exchange
@@ -146,7 +147,7 @@ the `JWT_OAUTH_CLIENT_SECRET` environment variable rather than the CLI flag.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth exchange \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -156,7 +157,7 @@ java -jar target/jwt-oauth-cli-0.4.0.jar oauth exchange \
 With PKCE verifier:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth exchange \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -171,7 +172,7 @@ matches `oauth exchange` (env `JWT_OAUTH_CLIENT_SECRET` preferred; never logged)
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth refresh \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client
@@ -180,7 +181,7 @@ java -jar target/jwt-oauth-cli-0.4.0.jar oauth refresh \
 Optional scope and compact output:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth refresh \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client \
@@ -195,7 +196,7 @@ Request an access token using the `client_credentials` grant. Prefer
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth client-credentials \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth client-credentials \
   --token-endpoint https://auth.example/token \
   --client-id my-client \
   --scope "api.read"
@@ -204,12 +205,59 @@ java -jar target/jwt-oauth-cli-0.4.0.jar oauth client-credentials \
 Compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth client-credentials \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth client-credentials \
   --token-endpoint https://auth.example/token \
   --client-id my-client \
   --compact
 ```
 
+
+### OAuth device code
+
+RFC 8628 device authorization start. POSTs `application/x-www-form-urlencoded`
+and prints `device_code`, `user_code`, `verification_uri`, `expires_in`, and
+`interval` (5 when the server omits it). `verification_uri_complete` is included
+when the server sends it. Prefer `JWT_OAUTH_CLIENT_SECRET` over
+`--client-secret` for confidential clients.
+
+```bash
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth device-code \
+  --device-authorization-endpoint https://auth.example/device \
+  --client-id my-client \
+  --scope "openid profile"
+```
+
+### OAuth device token
+
+Exchange a device code at the token endpoint
+(`grant_type=urn:ietf:params:oauth:grant-type:device_code`). A single attempt
+exits 0 when an access token is returned and 2 when the user has not finished
+(`authorization_pending` or `slow_down`), so a script can retry. Terminal
+errors such as `expired_token` and `access_denied` exit 1.
+
+```bash
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth device-token \
+  --token-endpoint https://auth.example/token \
+  --device-code DEVICE_CODE \
+  --client-id my-client
+```
+
+`--wait` polls until a token is issued, a terminal error occurs, or
+`--max-wait-seconds` (default 600) elapses. Sleep `--interval` seconds between
+attempts (default 5, typically the `interval` from `oauth device-code`). On
+`slow_down`, use `interval` from that response when present; otherwise add 5
+seconds to the current sleep.
+
+```bash
+export JWT_OAUTH_CLIENT_SECRET=your-secret
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth device-token \
+  --token-endpoint https://auth.example/token \
+  --device-code DEVICE_CODE \
+  --client-id my-client \
+  --interval 5 \
+  --max-wait-seconds 600 \
+  --wait
+```
 
 ### OAuth introspect
 
@@ -218,7 +266,7 @@ introspection endpoint. Prefer `JWT_OAUTH_CLIENT_SECRET` over `--client-secret`.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth introspect \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth introspect \
   --introspection-endpoint https://auth.example/introspect \
   --token ACCESS_TOKEN \
   --token-type-hint access_token \
@@ -232,7 +280,7 @@ RFC 7009 token revocation. Treats HTTP 200/204 as success and prints
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.4.0.jar oauth revoke \
+java -jar target/jwt-oauth-cli-0.5.0.jar oauth revoke \
   --revocation-endpoint https://auth.example/revoke \
   --token REFRESH_TOKEN \
   --token-type-hint refresh_token \
@@ -255,6 +303,9 @@ Core helpers live under `dev.rmkr.jwtoauthcli`:
 - `oauth.OauthSupport.refreshToken(params)` / `refreshToken(params, formPoster)`
 - `oauth.OauthSupport.clientCredentials(params)` /
   `clientCredentials(params, formPoster)`
+- `oauth.OauthSupport.deviceAuthorization(params)` /
+  `deviceAuthorization(params, formPoster)`
+- `oauth.OauthSupport.deviceToken(params)` / `deviceToken(params, formPoster)`
 - `oauth.OauthSupport.introspect(params)` / `introspect(params, formPoster)`
 - `oauth.OauthSupport.revoke(params)` / `revoke(params, formPoster)`
 

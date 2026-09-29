@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.rmkr.jwtoauthcli.http.FormPoster;
 import dev.rmkr.jwtoauthcli.http.JavaHttpFormPoster;
+import dev.rmkr.jwtoauthcli.http.JavaHttpJsonGetClient;
+import dev.rmkr.jwtoauthcli.http.JsonGetClient;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -21,13 +23,28 @@ import java.util.StringJoiner;
  * OAuth 2.0 helpers: authorize URL construction, local code exchange,
  * PKCE generation, refresh-token grant, client-credentials grant,
  * device authorization grant (RFC 8628), token introspection (RFC 7662),
- * and token revocation (RFC 7009).
+ * token revocation (RFC 7009), OIDC/OAuth metadata discovery, and UserInfo.
  */
 public final class OauthSupport {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
   private static final FormPoster DEFAULT_POSTER = new JavaHttpFormPoster();
+  private static final JsonGetClient DEFAULT_GETTER = new JavaHttpJsonGetClient();
+
+  private static final String[] DISCOVERY_FOCUS_KEYS = {
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_uri",
+    "userinfo_endpoint",
+    "introspection_endpoint",
+    "revocation_endpoint",
+    "device_authorization_endpoint",
+    "scopes_supported",
+    "grant_types_supported",
+    "code_challenge_methods_supported"
+  };
 
   private OauthSupport() {}
 
@@ -438,6 +455,186 @@ public final class OauthSupport {
 
     throw new IllegalStateException(
         "Device token request failed: " + errorMessage(data, response.status()));
+  }
+
+
+
+  /**
+   * Prefer a non-empty environment secret over a CLI flag value so tokens stay
+   * out of process lists and shell history. Never logs either value.
+   */
+  public static String preferEnvOverFlag(String envValue, String flagValue) {
+    if (envValue != null && !envValue.isEmpty()) {
+      return envValue;
+    }
+    return flagValue;
+  }
+
+  public static Map<String, Object> discover(Map<String, Object> params) throws Exception {
+    return discover(params, DEFAULT_GETTER);
+  }
+
+  /**
+   * Fetch OpenID Provider / OAuth Authorization Server metadata. Prefer
+   * {@code metadataUrl} when set; otherwise resolve from {@code issuer}
+   * ({@code /.well-known/openid-configuration}, falling back to
+   * {@code /.well-known/oauth-authorization-server} on HTTP 404).
+   */
+  public static Map<String, Object> discover(Map<String, Object> params, JsonGetClient getter)
+      throws Exception {
+    String metadataUrl = asNullableString(params.get("metadataUrl"));
+    String issuer = asNullableString(params.get("issuer"));
+
+    boolean hasMeta = metadataUrl != null && !metadataUrl.isEmpty();
+    boolean hasIssuer = issuer != null && !issuer.isEmpty();
+    if (hasMeta == hasIssuer) {
+      throw new IllegalArgumentException("exactly one of issuer or metadataUrl is required");
+    }
+
+    if (hasMeta) {
+      validateUrl(metadataUrl, "metadataUrl");
+      return fetchAndFocusMetadata(metadataUrl, getter, "Metadata discovery failed");
+    }
+
+    validateUrl(issuer, "issuer");
+    String oidcUrl = resolveOidcDiscoveryUrl(issuer);
+    FormPoster.HttpResponse oidcResponse = getJson(oidcUrl, getter, Map.of("accept", "application/json"));
+    if (oidcResponse.status() == 404) {
+      String oauthUrl = resolveOauthAsDiscoveryUrl(issuer);
+      return fetchAndFocusMetadata(oauthUrl, getter, "Metadata discovery failed");
+    }
+    if (!oidcResponse.ok()) {
+      throw new IllegalStateException(
+          "Metadata discovery failed: HTTP " + oidcResponse.status() + " from " + oidcUrl);
+    }
+    return focusMetadata(
+        parseJsonObject(oidcResponse.body(), oidcResponse.status(), "Metadata discovery failed"));
+  }
+
+  public static Map<String, Object> userinfo(Map<String, Object> params) throws Exception {
+    return userinfo(params, DEFAULT_GETTER);
+  }
+
+  /**
+   * OIDC UserInfo request. GETs the endpoint with {@code Authorization: Bearer}.
+   */
+  public static Map<String, Object> userinfo(Map<String, Object> params, JsonGetClient getter)
+      throws Exception {
+    String endpoint = requireString(params, "userinfoEndpoint");
+    String accessToken = requireString(params, "accessToken");
+    validateUrl(endpoint, "userinfoEndpoint");
+
+    Map<String, String> headers = new LinkedHashMap<>();
+    headers.put("accept", "application/json");
+    headers.put("authorization", "Bearer " + accessToken);
+
+    FormPoster.HttpResponse response = getJson(endpoint, getter, headers);
+    if (!response.ok()) {
+      String text = response.body() == null ? "" : response.body();
+      String errMsg = "HTTP " + response.status();
+      if (!text.isBlank()) {
+        try {
+          Map<String, Object> data =
+              MAPPER.readValue(text, new TypeReference<LinkedHashMap<String, Object>>() {});
+          Object desc = data.get("error_description");
+          Object err = data.get("error");
+          if (desc != null) {
+            errMsg = String.valueOf(desc);
+          } else if (err != null) {
+            errMsg = String.valueOf(err);
+          }
+        } catch (Exception ignored) {
+          String snippet = text.length() > 200 ? text.substring(0, 200) : text;
+          errMsg = snippet;
+        }
+      }
+      throw new IllegalStateException("UserInfo request failed: " + errMsg);
+    }
+    return parseJsonObject(response.body(), response.status(), "UserInfo request failed");
+  }
+
+  /** Visible for tests: normalize issuer into an OIDC discovery URL. */
+  static String resolveOidcDiscoveryUrl(String issuer) {
+    String trimmed = stripTrailingSlash(issuer.trim());
+    String lower = trimmed.toLowerCase();
+    if (lower.endsWith("/.well-known/openid-configuration")
+        || lower.endsWith("/.well-known/oauth-authorization-server")) {
+      return trimmed;
+    }
+    return trimmed + "/.well-known/openid-configuration";
+  }
+
+  /** Visible for tests: OAuth Authorization Server metadata URL for an issuer. */
+  static String resolveOauthAsDiscoveryUrl(String issuer) {
+    String trimmed = stripTrailingSlash(issuer.trim());
+    String lower = trimmed.toLowerCase();
+    if (lower.endsWith("/.well-known/openid-configuration")) {
+      int idx = trimmed.toLowerCase().lastIndexOf("/.well-known/openid-configuration");
+      return trimmed.substring(0, idx) + "/.well-known/oauth-authorization-server";
+    }
+    if (lower.endsWith("/.well-known/oauth-authorization-server")) {
+      return trimmed;
+    }
+    return trimmed + "/.well-known/oauth-authorization-server";
+  }
+
+  private static String stripTrailingSlash(String s) {
+    String out = s;
+    while (out.length() > 1 && out.endsWith("/")) {
+      out = out.substring(0, out.length() - 1);
+    }
+    return out;
+  }
+
+  private static Map<String, Object> fetchAndFocusMetadata(
+      String url, JsonGetClient getter, String failPrefix) throws Exception {
+    FormPoster.HttpResponse response = getJson(url, getter, Map.of("accept", "application/json"));
+    if (!response.ok()) {
+      throw new IllegalStateException(failPrefix + ": HTTP " + response.status() + " from " + url);
+    }
+    return focusMetadata(parseJsonObject(response.body(), response.status(), failPrefix));
+  }
+
+  private static FormPoster.HttpResponse getJson(
+      String url, JsonGetClient getter, Map<String, String> headers) throws Exception {
+    return getter.get(url, headers);
+  }
+
+  private static Map<String, Object> parseJsonObject(String text, int status, String failPrefix) {
+    String body = text == null ? "" : text;
+    if (body.isBlank()) {
+      throw new IllegalStateException(failPrefix + ": empty JSON body (HTTP " + status + ")");
+    }
+    try {
+      Object parsed = MAPPER.readValue(body, Object.class);
+      if (!(parsed instanceof Map<?, ?>)) {
+        throw new IllegalStateException(
+            failPrefix + ": JSON root must be an object (HTTP " + status + ")");
+      }
+      @SuppressWarnings("unchecked")
+      Map<String, Object> map = (Map<String, Object>) parsed;
+      return new LinkedHashMap<>(map);
+    } catch (IllegalStateException e) {
+      throw e;
+    } catch (Exception e) {
+      String snippet = body.length() > 200 ? body.substring(0, 200) : body;
+      throw new IllegalStateException(
+          failPrefix + ": invalid JSON (HTTP " + status + "): " + snippet, e);
+    }
+  }
+
+  private static Map<String, Object> focusMetadata(Map<String, Object> raw) {
+    Object issuerVal = raw.get("issuer");
+    if (!(issuerVal instanceof String s) || s.isEmpty()) {
+      throw new IllegalStateException("Metadata discovery failed: response missing issuer");
+    }
+    Map<String, Object> focused = new LinkedHashMap<>();
+    for (String key : DISCOVERY_FOCUS_KEYS) {
+      if (raw.containsKey(key) && raw.get(key) != null) {
+        focused.put(key, raw.get(key));
+      }
+    }
+    return focused;
   }
 
   private record Posted(FormPoster.HttpResponse response, Map<String, Object> data) {}

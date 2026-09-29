@@ -14,7 +14,9 @@ import picocli.CommandLine.Command;
       OauthIntrospectCommand.class,
       OauthRevokeCommand.class,
       OauthDeviceCodeCommand.class,
-      OauthDeviceTokenCommand.class
+      OauthDeviceTokenCommand.class,
+      OauthDiscoverCommand.class,
+      OauthUserinfoCommand.class
     })
 public class OauthCommands implements Runnable {
   @Override

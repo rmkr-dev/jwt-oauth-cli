@@ -1,6 +1,7 @@
 package dev.rmkr.jwtoauthcli.oauth;
 
 import dev.rmkr.jwtoauthcli.http.FormPoster;
+import dev.rmkr.jwtoauthcli.http.JsonGetClient;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -578,7 +579,284 @@ class OauthSupportTest {
     assertTrue(deniedEx.getMessage().contains("user denied the request"));
   }
 
+
+  @Test
+  void discoverFromIssuerFetchesOidcMetadata() throws Exception {
+    List<GetCaptured> calls = new ArrayList<>();
+    JsonGetClient getter =
+        (url, headers) -> {
+          calls.add(new GetCaptured(url, headers));
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{"
+                  + "\"issuer\":\"https://auth.example\","
+                  + "\"authorization_endpoint\":\"https://auth.example/authorize\","
+                  + "\"token_endpoint\":\"https://auth.example/token\","
+                  + "\"jwks_uri\":\"https://auth.example/jwks\","
+                  + "\"userinfo_endpoint\":\"https://auth.example/userinfo\","
+                  + "\"introspection_endpoint\":\"https://auth.example/introspect\","
+                  + "\"revocation_endpoint\":\"https://auth.example/revoke\","
+                  + "\"device_authorization_endpoint\":\"https://auth.example/device\","
+                  + "\"scopes_supported\":[\"openid\",\"profile\"],"
+                  + "\"grant_types_supported\":[\"authorization_code\",\"refresh_token\"],"
+                  + "\"code_challenge_methods_supported\":[\"S256\"],"
+                  + "\"claims_supported\":[\"sub\",\"name\"]"
+                  + "}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("issuer", "https://auth.example");
+
+    Map<String, Object> result = OauthSupport.discover(params, getter);
+    assertEquals("https://auth.example", result.get("issuer"));
+    assertEquals("https://auth.example/authorize", result.get("authorization_endpoint"));
+    assertEquals("https://auth.example/token", result.get("token_endpoint"));
+    assertEquals("https://auth.example/jwks", result.get("jwks_uri"));
+    assertEquals("https://auth.example/userinfo", result.get("userinfo_endpoint"));
+    assertEquals("https://auth.example/introspect", result.get("introspection_endpoint"));
+    assertEquals("https://auth.example/revoke", result.get("revocation_endpoint"));
+    assertEquals("https://auth.example/device", result.get("device_authorization_endpoint"));
+    assertEquals(List.of("openid", "profile"), result.get("scopes_supported"));
+    assertEquals(List.of("authorization_code", "refresh_token"), result.get("grant_types_supported"));
+    assertEquals(List.of("S256"), result.get("code_challenge_methods_supported"));
+    assertFalse(result.containsKey("claims_supported"));
+    assertEquals(1, calls.size());
+    assertEquals(
+        "https://auth.example/.well-known/openid-configuration", calls.get(0).url);
+    assertTrue(calls.get(0).headers.get("accept").contains("application/json"));
+  }
+
+  @Test
+  void discoverFallsBackToOauthAsMetadataOnOidc404() throws Exception {
+    List<String> urls = new ArrayList<>();
+    JsonGetClient getter =
+        (url, headers) -> {
+          urls.add(url);
+          if (url.endsWith("/.well-known/openid-configuration")) {
+            return new FormPoster.HttpResponse(404, false, "not found");
+          }
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{\"issuer\":\"https://auth.example\",\"token_endpoint\":\"https://auth.example/token\"}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("issuer", "https://auth.example/");
+
+    Map<String, Object> result = OauthSupport.discover(params, getter);
+    assertEquals("https://auth.example", result.get("issuer"));
+    assertEquals("https://auth.example/token", result.get("token_endpoint"));
+    assertEquals(2, urls.size());
+    assertEquals("https://auth.example/.well-known/openid-configuration", urls.get(0));
+    assertEquals("https://auth.example/.well-known/oauth-authorization-server", urls.get(1));
+  }
+
+  @Test
+  void discoverUsesDirectMetadataUrl() throws Exception {
+    List<GetCaptured> calls = new ArrayList<>();
+    JsonGetClient getter =
+        (url, headers) -> {
+          calls.add(new GetCaptured(url, headers));
+          return new FormPoster.HttpResponse(
+              200,
+              true,
+              "{\"issuer\":\"https://idp.example\",\"authorization_endpoint\":\"https://idp.example/a\"}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("metadataUrl", "https://idp.example/custom/openid-configuration");
+
+    Map<String, Object> result = OauthSupport.discover(params, getter);
+    assertEquals("https://idp.example", result.get("issuer"));
+    assertEquals(1, calls.size());
+    assertEquals("https://idp.example/custom/openid-configuration", calls.get(0).url);
+  }
+
+  @Test
+  void discoverOmitsAbsentFocusKeys() throws Exception {
+    JsonGetClient getter =
+        (url, headers) ->
+            new FormPoster.HttpResponse(
+                200,
+                true,
+                "{\"issuer\":\"https://auth.example\",\"token_endpoint\":\"https://auth.example/token\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("issuer", "https://auth.example");
+
+    Map<String, Object> result = OauthSupport.discover(params, getter);
+    assertEquals(2, result.size());
+    assertTrue(result.containsKey("issuer"));
+    assertTrue(result.containsKey("token_endpoint"));
+    assertFalse(result.containsKey("userinfo_endpoint"));
+  }
+
+  @Test
+  void discoverSurfacesNon2xx() {
+    JsonGetClient getter =
+        (url, headers) -> new FormPoster.HttpResponse(500, false, "boom");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("issuer", "https://auth.example");
+
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.discover(params, getter));
+    assertTrue(ex.getMessage().contains("HTTP 500"));
+    assertTrue(ex.getMessage().contains("Metadata discovery failed"));
+  }
+
+  @Test
+  void discoverRejectsInvalidJson() {
+    JsonGetClient getter =
+        (url, headers) -> new FormPoster.HttpResponse(200, true, "not-json");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("metadataUrl", "https://auth.example/meta");
+
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.discover(params, getter));
+    assertTrue(ex.getMessage().contains("invalid JSON"));
+  }
+
+  @Test
+  void discoverRequiresIssuerInResponse() {
+    JsonGetClient getter =
+        (url, headers) ->
+            new FormPoster.HttpResponse(
+                200, true, "{\"token_endpoint\":\"https://auth.example/token\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("metadataUrl", "https://auth.example/meta");
+
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.discover(params, getter));
+    assertTrue(ex.getMessage().contains("missing issuer"));
+  }
+
+  @Test
+  void discoverRequiresExactlyOneOfIssuerOrMetadataUrl() {
+    Exception neither =
+        assertThrows(Exception.class, () -> OauthSupport.discover(new LinkedHashMap<>()));
+    assertTrue(neither.getMessage().contains("exactly one"));
+
+    Map<String, Object> both = new LinkedHashMap<>();
+    both.put("issuer", "https://auth.example");
+    both.put("metadataUrl", "https://auth.example/meta");
+    Exception bothEx = assertThrows(Exception.class, () -> OauthSupport.discover(both));
+    assertTrue(bothEx.getMessage().contains("exactly one"));
+  }
+
+  @Test
+  void resolveOidcDiscoveryUrlNormalizesTrailingSlashAndWellKnown() {
+    assertEquals(
+        "https://auth.example/.well-known/openid-configuration",
+        OauthSupport.resolveOidcDiscoveryUrl("https://auth.example"));
+    assertEquals(
+        "https://auth.example/.well-known/openid-configuration",
+        OauthSupport.resolveOidcDiscoveryUrl("https://auth.example/"));
+    assertEquals(
+        "https://auth.example/.well-known/openid-configuration",
+        OauthSupport.resolveOidcDiscoveryUrl(
+            "https://auth.example/.well-known/openid-configuration"));
+    assertEquals(
+        "https://auth.example/.well-known/oauth-authorization-server",
+        OauthSupport.resolveOidcDiscoveryUrl(
+            "https://auth.example/.well-known/oauth-authorization-server"));
+  }
+
+  @Test
+  void resolveOauthAsDiscoveryUrlFromIssuerAndOidcPath() {
+    assertEquals(
+        "https://auth.example/.well-known/oauth-authorization-server",
+        OauthSupport.resolveOauthAsDiscoveryUrl("https://auth.example"));
+    assertEquals(
+        "https://auth.example/.well-known/oauth-authorization-server",
+        OauthSupport.resolveOauthAsDiscoveryUrl(
+            "https://auth.example/.well-known/openid-configuration"));
+  }
+
+  @Test
+  void userinfoSendsBearerAndReturnsJson() throws Exception {
+    List<GetCaptured> calls = new ArrayList<>();
+    JsonGetClient getter =
+        (url, headers) -> {
+          calls.add(new GetCaptured(url, headers));
+          return new FormPoster.HttpResponse(
+              200, true, "{\"sub\":\"user-1\",\"name\":\"Alice\",\"email\":\"a@example.com\"}");
+        };
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("userinfoEndpoint", "https://auth.example/userinfo");
+    params.put("accessToken", "atok-secret");
+
+    Map<String, Object> result = OauthSupport.userinfo(params, getter);
+    assertEquals("user-1", result.get("sub"));
+    assertEquals("Alice", result.get("name"));
+    assertEquals(1, calls.size());
+    assertEquals("https://auth.example/userinfo", calls.get(0).url);
+    assertEquals("Bearer atok-secret", calls.get(0).headers.get("authorization"));
+    assertTrue(calls.get(0).headers.get("accept").contains("application/json"));
+  }
+
+  @Test
+  void userinfoSurfacesNon2xx() {
+    JsonGetClient getter =
+        (url, headers) ->
+            new FormPoster.HttpResponse(
+                401,
+                false,
+                "{\"error\":\"invalid_token\",\"error_description\":\"token expired\"}");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("userinfoEndpoint", "https://auth.example/userinfo");
+    params.put("accessToken", "bad");
+
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.userinfo(params, getter));
+    assertTrue(ex.getMessage().contains("token expired"));
+    assertTrue(ex.getMessage().contains("UserInfo request failed"));
+  }
+
+  @Test
+  void userinfoRequiresAccessTokenAndEndpoint() {
+    Map<String, Object> missingToken = new LinkedHashMap<>();
+    missingToken.put("userinfoEndpoint", "https://auth.example/userinfo");
+    Exception tokEx =
+        assertThrows(Exception.class, () -> OauthSupport.userinfo(missingToken));
+    assertTrue(tokEx.getMessage().contains("accessToken"));
+
+    Map<String, Object> missingEndpoint = new LinkedHashMap<>();
+    missingEndpoint.put("accessToken", "atok");
+    Exception epEx =
+        assertThrows(Exception.class, () -> OauthSupport.userinfo(missingEndpoint));
+    assertTrue(epEx.getMessage().contains("userinfoEndpoint"));
+  }
+
+  @Test
+  void userinfoRejectsInvalidJson() {
+    JsonGetClient getter =
+        (url, headers) -> new FormPoster.HttpResponse(200, true, "<html>nope</html>");
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("userinfoEndpoint", "https://auth.example/userinfo");
+    params.put("accessToken", "atok");
+
+    Exception ex = assertThrows(Exception.class, () -> OauthSupport.userinfo(params, getter));
+    assertTrue(ex.getMessage().contains("invalid JSON"));
+    assertTrue(ex.getMessage().contains("UserInfo request failed"));
+  }
+
+
+  @Test
+  void preferEnvOverFlagPrefersNonEmptyEnv() {
+    assertEquals("from-env", OauthSupport.preferEnvOverFlag("from-env", "from-flag"));
+    assertEquals("from-flag", OauthSupport.preferEnvOverFlag(null, "from-flag"));
+    assertEquals("from-flag", OauthSupport.preferEnvOverFlag("", "from-flag"));
+    assertNull(OauthSupport.preferEnvOverFlag(null, null));
+    assertEquals("", OauthSupport.preferEnvOverFlag("", ""));
+  }
+
   private record Captured(String url, String formBody, Map<String, String> headers) {}
+
+  private record GetCaptured(String url, Map<String, String> headers) {}
 
   private static Map<String, String> query(java.net.URI uri) {
     Map<String, String> map = new LinkedHashMap<>();

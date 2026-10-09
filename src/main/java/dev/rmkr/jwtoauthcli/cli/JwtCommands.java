@@ -9,7 +9,8 @@ import picocli.CommandLine.Command;
       JwtDecodeCommand.class,
       JwtInspectCommand.class,
       JwtVerifyCommand.class,
-      JwtSignCommand.class
+      JwtSignCommand.class,
+      JwtKeygenCommand.class
     })
 public class JwtCommands implements Runnable {
   @Override

@@ -13,16 +13,16 @@ Requires JDK 17+.
 mvn -q package
 ```
 
-The shaded jar is written to `target/jwt-oauth-cli-0.6.0.jar`.
+The shaded jar is written to `target/jwt-oauth-cli-0.7.0.jar`.
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar --help
+java -jar target/jwt-oauth-cli-0.7.0.jar --help
 ```
 
 Optional install-style alias:
 
 ```bash
-alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.6.0.jar'
+alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.7.0.jar'
 ```
 
 ## Usage
@@ -32,7 +32,7 @@ alias jwt-oauth-cli='java -jar /path/to/jwt-oauth-cli-0.6.0.jar'
 Decode header and payload (no signature verification):
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.
 ```
 
 ### JWT inspect
@@ -40,7 +40,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar jwt decode eyJhbGciOiJub25lIn0.eyJzdWIi
 Summarize claims and expiration:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt inspect eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZXhwIjoxODkzNDU2MDAwfQ.
 ```
 
 ### JWT verify
@@ -53,7 +53,7 @@ HMAC:
 
 ```bash
 export JWT_OAUTH_HMAC_SECRET=your-hmac-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar jwt verify "$TOKEN" \
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt verify "$TOKEN" \
   --iss https://issuer.example \
   --aud api \
   --exp-leeway-seconds 60
@@ -62,7 +62,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar jwt verify "$TOKEN" \
 JWKS:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar jwt verify "$TOKEN" \
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt verify "$TOKEN" \
   --jwks-url https://auth.example/.well-known/jwks.json \
   --iss https://issuer.example \
   --aud api \
@@ -81,7 +81,7 @@ HS512.
 
 ```bash
 export JWT_OAUTH_HMAC_SECRET=your-hmac-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar jwt sign \
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt sign \
   --sub user-1 \
   --iss https://issuer.example \
   --aud api \
@@ -93,7 +93,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar jwt sign \
 Random `jti` and compact output:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar jwt sign \
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt sign \
   --sub user-1 \
   --alg HS512 \
   --jti-random \
@@ -102,10 +102,25 @@ java -jar target/jwt-oauth-cli-0.6.0.jar jwt sign \
 
 Successful output includes `token`, `header`, and `payload`.
 
+### JWT keygen
+
+Generate a signing key as a JWK for local testing. RSA and EC keys also print
+the public JWK and a ready-to-serve JWKS (useful with `jwt verify --jwks`).
+Algorithms: RS256/384/512, PS256/384/512, ES256/384/512, HS256/384/512. The
+`kid` defaults to the RFC 7638 thumbprint.
+
+```bash
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt keygen --alg ES256 --kid local-ec
+java -jar target/jwt-oauth-cli-0.7.0.jar jwt keygen --alg RS256 --rsa-bits 3072 --public-only > jwks.json
+```
+
+Output includes `alg`, `kty`, `kid`, `jwk` (private) and, for RSA/EC,
+`publicJwk` and `jwks`. Keep private output out of source control.
+
 ### OAuth authorize URL
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -116,7 +131,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar oauth authorize-url \
 Optional PKCE (pair the challenge with values from `oauth pkce`):
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth authorize-url \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth authorize-url \
   --authorization-endpoint https://auth.example/authorize \
   --client-id my-client \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -130,13 +145,13 @@ java -jar target/jwt-oauth-cli-0.6.0.jar oauth authorize-url \
 Generate a `code_verifier`, S256 `code_challenge`, and random `state`:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth pkce
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth pkce
 ```
 
 Compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth pkce --compact
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth pkce --compact
 ```
 
 ### OAuth code exchange
@@ -147,7 +162,7 @@ the `JWT_OAUTH_CLIENT_SECRET` environment variable rather than the CLI flag.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth exchange \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -157,7 +172,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar oauth exchange \
 With PKCE verifier:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth exchange \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth exchange \
   --token-endpoint https://auth.example/token \
   --code AUTH_CODE \
   --redirect-uri http://127.0.0.1:8080/callback \
@@ -172,7 +187,7 @@ matches `oauth exchange` (env `JWT_OAUTH_CLIENT_SECRET` preferred; never logged)
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth refresh \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client
@@ -181,7 +196,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar oauth refresh \
 Optional scope and compact output:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth refresh \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth refresh \
   --token-endpoint https://auth.example/token \
   --refresh-token REFRESH_TOKEN \
   --client-id my-client \
@@ -196,7 +211,7 @@ Request an access token using the `client_credentials` grant. Prefer
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth client-credentials \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth client-credentials \
   --token-endpoint https://auth.example/token \
   --client-id my-client \
   --scope "api.read"
@@ -205,7 +220,7 @@ java -jar target/jwt-oauth-cli-0.6.0.jar oauth client-credentials \
 Compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth client-credentials \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth client-credentials \
   --token-endpoint https://auth.example/token \
   --client-id my-client \
   --compact
@@ -221,7 +236,7 @@ when the server sends it. Prefer `JWT_OAUTH_CLIENT_SECRET` over
 `--client-secret` for confidential clients.
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth device-code \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth device-code \
   --device-authorization-endpoint https://auth.example/device \
   --client-id my-client \
   --scope "openid profile"
@@ -236,7 +251,7 @@ exits 0 when an access token is returned and 2 when the user has not finished
 errors such as `expired_token` and `access_denied` exit 1.
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth device-token \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth device-token \
   --token-endpoint https://auth.example/token \
   --device-code DEVICE_CODE \
   --client-id my-client
@@ -250,7 +265,7 @@ seconds to the current sleep.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth device-token \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth device-token \
   --token-endpoint https://auth.example/token \
   --device-code DEVICE_CODE \
   --client-id my-client \
@@ -266,7 +281,7 @@ introspection endpoint. Prefer `JWT_OAUTH_CLIENT_SECRET` over `--client-secret`.
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth introspect \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth introspect \
   --introspection-endpoint https://auth.example/introspect \
   --token ACCESS_TOKEN \
   --token-type-hint access_token \
@@ -280,7 +295,7 @@ RFC 7009 token revocation. Treats HTTP 200/204 as success and prints
 
 ```bash
 export JWT_OAUTH_CLIENT_SECRET=your-secret
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth revoke \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth revoke \
   --revocation-endpoint https://auth.example/revoke \
   --token REFRESH_TOKEN \
   --token-type-hint refresh_token \
@@ -298,14 +313,14 @@ document URL directly. Output includes common endpoints and capability arrays
 when the server advertises them.
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth discover \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth discover \
   --issuer https://auth.example
 ```
 
 Direct metadata URL and compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth discover \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth discover \
   --metadata-url https://auth.example/.well-known/openid-configuration \
   --compact
 ```
@@ -317,14 +332,14 @@ Call the OIDC UserInfo endpoint with a bearer access token. Prefer
 
 ```bash
 export JWT_OAUTH_ACCESS_TOKEN=ACCESS_TOKEN
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth userinfo \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth userinfo \
   --userinfo-endpoint https://auth.example/userinfo
 ```
 
 Compact JSON:
 
 ```bash
-java -jar target/jwt-oauth-cli-0.6.0.jar oauth userinfo \
+java -jar target/jwt-oauth-cli-0.7.0.jar oauth userinfo \
   --userinfo-endpoint https://auth.example/userinfo \
   --access-token ACCESS_TOKEN \
   --compact

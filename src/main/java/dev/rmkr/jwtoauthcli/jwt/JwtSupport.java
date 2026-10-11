@@ -2,7 +2,6 @@ package dev.rmkr.jwtoauthcli.jwt;
 
 import com.nimbusds.jose.Header;
 import com.nimbusds.jose.JOSEException;
-import com.nimbusds.jose.crypto.impl.ECDSA;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.JWSVerifier;
@@ -334,7 +333,14 @@ public final class JwtSupport {
       } else if (signingJwk instanceof RSAKey) {
         algName = "RS256";
       } else if (signingJwk instanceof ECKey ec) {
-        algName = ECDSA.resolveAlgorithm(ec.getCurve()).getName();
+        String crv = ec.getCurve() != null ? ec.getCurve().getName() : "";
+        algName =
+            switch (crv) {
+              case "P-384" -> "ES384";
+              case "P-521" -> "ES512";
+              case "secp256k1" -> "ES256K";
+              default -> "ES256";
+            };
       }
     }
     if (algName == null || algName.isEmpty()) {

@@ -2,6 +2,7 @@ package dev.rmkr.jwtoauthcli.jwt;
 
 import com.nimbusds.jose.Header;
 import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.crypto.impl.ECDSA;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.JWSVerifier;
@@ -173,11 +174,14 @@ public final class JwtSupport {
 
     String secret = asNullableString(opts.get("secret"));
     String jwksUrl = asNullableString(opts.get("jwksUrl"));
+    String jwksFile = asNullableString(opts.get("jwksFile"));
     boolean hasSecret = secret != null && !secret.isEmpty();
-    boolean hasJwks = jwksUrl != null && !jwksUrl.isEmpty();
-    if (hasSecret == hasJwks) {
+    boolean hasJwksUrl = jwksUrl != null && !jwksUrl.isEmpty();
+    boolean hasJwksFile = jwksFile != null && !jwksFile.isEmpty();
+    int sources = (hasSecret ? 1 : 0) + (hasJwksUrl ? 1 : 0) + (hasJwksFile ? 1 : 0);
+    if (sources != 1) {
       throw new IllegalArgumentException(
-          "Provide exactly one of --secret (or JWT_OAUTH_HMAC_SECRET) or --jwks-url");
+          "Provide exactly one of --secret (or JWT_OAUTH_HMAC_SECRET), --jwks-url, or --jwks-file");
     }
 
     SignedJWT signed;
@@ -197,8 +201,10 @@ public final class JwtSupport {
       JWSVerifier verifier;
       if (hasSecret) {
         verifier = hmacVerifier(alg, secret);
+      } else if (hasJwksUrl) {
+        verifier = jwksVerifier(alg, jwsHeader, fetchJwks(jwksUrl, opts), "JWKS URL");
       } else {
-        verifier = jwksVerifier(alg, jwsHeader, jwksUrl, opts);
+        verifier = jwksVerifier(alg, jwsHeader, readFile(jwksFile, "JWKS file"), "JWKS file");
       }
 
       if (!signed.verify(verifier)) {
@@ -267,7 +273,7 @@ public final class JwtSupport {
 
 
   /**
-   * Create an HMAC-signed JWT for local testing.
+   * Create a signed JWT for local testing (HMAC secret or private RSA/EC JWK).
    *
    * <p>Supported options (Map keys):
    * <ul>
@@ -289,19 +295,70 @@ public final class JwtSupport {
     Map<String, Object> opts = claimsOrOptions != null ? claimsOrOptions : Map.of();
 
     String secret = asNullableString(opts.get("secret"));
-    if (secret == null || secret.isEmpty()) {
+    String jwkFile = asNullableString(opts.get("jwkFile"));
+    String jwkJson = asNullableString(opts.get("jwkJson"));
+    boolean hasSecret = secret != null && !secret.isEmpty();
+    JWK signingJwk = null;
+    if (jwkJson == null && jwkFile != null && !jwkFile.isEmpty()) {
+      jwkJson = readFile(jwkFile, "JWK file");
+    }
+    if (jwkJson != null && !jwkJson.isEmpty()) {
+      if (hasSecret) {
+        throw new IllegalArgumentException(
+            "Provide either an HMAC secret or --jwk-file, not both");
+      }
+      JWKSet set = parseJwkSetOrKey(jwkJson);
+      List<JWK> privates = new ArrayList<>();
+      for (JWK k : set.getKeys()) {
+        if (k.isPrivate()) {
+          privates.add(k);
+        }
+      }
+      if (privates.size() != 1) {
+        throw new IllegalArgumentException(
+            "JWK file must contain exactly one private RSA or EC key (found "
+                + privates.size()
+                + ")");
+      }
+      signingJwk = privates.get(0);
+    } else if (!hasSecret) {
       throw new IllegalArgumentException(
-          "secret is required (pass --secret or set JWT_OAUTH_HMAC_SECRET)");
+          "secret is required (pass --secret or set JWT_OAUTH_HMAC_SECRET), or use --jwk-file");
     }
 
     String algName = asNullableString(opts.get("alg"));
+    boolean algExplicit = Boolean.TRUE.equals(opts.get("algExplicit"));
+    if (signingJwk != null && (!algExplicit || algName == null || algName.isEmpty())) {
+      if (signingJwk.getAlgorithm() != null) {
+        algName = signingJwk.getAlgorithm().getName();
+      } else if (signingJwk instanceof RSAKey) {
+        algName = "RS256";
+      } else if (signingJwk instanceof ECKey ec) {
+        algName = ECDSA.resolveAlgorithm(ec.getCurve()).getName();
+      }
+    }
     if (algName == null || algName.isEmpty()) {
       algName = "HS256";
     }
     JWSAlgorithm alg = JWSAlgorithm.parse(algName);
-    if (!JWSAlgorithm.Family.HMAC_SHA.contains(alg)) {
+    if (signingJwk == null && !JWSAlgorithm.Family.HMAC_SHA.contains(alg)) {
       throw new IllegalArgumentException(
-          "Unsupported signing algorithm: " + algName + " (expected HS256/HS384/HS512)");
+          "Unsupported signing algorithm: "
+              + algName
+              + " (expected HS256/HS384/HS512, or pass --jwk-file for RS/PS/ES)");
+    }
+    if (signingJwk instanceof RSAKey
+        && !JWSAlgorithm.Family.RSA.contains(alg)) {
+      throw new IllegalArgumentException(
+          "Algorithm " + algName + " does not match RSA key (expected RS*/PS*)");
+    }
+    if (signingJwk instanceof ECKey && !JWSAlgorithm.Family.EC.contains(alg)) {
+      throw new IllegalArgumentException(
+          "Algorithm " + algName + " does not match EC key (expected ES*)");
+    }
+    if (signingJwk != null && !(signingJwk instanceof RSAKey) && !(signingJwk instanceof ECKey)) {
+      throw new IllegalArgumentException(
+          "Unsupported JWK key type for signing: " + signingJwk.getKeyType());
     }
 
     Long nowSec = asLong(opts.get("nowSec"));
@@ -406,8 +463,28 @@ public final class JwtSupport {
     String kid = asNullableString(opts.get("kid"));
     if (kid != null && !kid.isEmpty()) {
       headerBuilder.keyID(kid);
+    } else if (signingJwk != null && signingJwk.getKeyID() != null) {
+      headerBuilder.keyID(signingJwk.getKeyID());
     }
     JWSHeader header = headerBuilder.build();
+
+    if (signingJwk != null) {
+      SignedJWT asym = new SignedJWT(header, claims);
+      try {
+        if (signingJwk instanceof RSAKey rsa) {
+          asym.sign(new com.nimbusds.jose.crypto.RSASSASigner(rsa));
+        } else {
+          asym.sign(new com.nimbusds.jose.crypto.ECDSASigner((ECKey) signingJwk));
+        }
+      } catch (JOSEException e) {
+        throw new IllegalArgumentException("Failed to sign JWT: " + e.getMessage(), e);
+      }
+      Map<String, Object> out = new LinkedHashMap<>();
+      out.put("token", asym.serialize());
+      out.put("header", new LinkedHashMap<>(header.toJSONObject()));
+      out.put("payload", new LinkedHashMap<>(claims.toJSONObject()));
+      return out;
+    }
 
     byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
     int minBits =
@@ -474,36 +551,54 @@ public final class JwtSupport {
     return new MACVerifier(keyBytes);
   }
 
-  private static JWSVerifier jwksVerifier(
-      JWSAlgorithm alg, JWSHeader header, String jwksUrl, Map<String, Object> opts)
-      throws JOSEException {
-    if (JWSAlgorithm.Family.HMAC_SHA.contains(alg)) {
-      throw new IllegalArgumentException(
-          "JWKS URL provided but algorithm is "
-              + alg.getName()
-              + " (use --secret for HMAC)");
-    }
-
+  private static String fetchJwks(String jwksUrl, Map<String, Object> opts) {
     JwksFetcher fetcher = DEFAULT_JWKS_FETCHER;
     Object custom = opts.get("jwksFetcher");
     if (custom instanceof JwksFetcher jf) {
       fetcher = jf;
     }
-
-    String body;
     try {
-      body = fetcher.get(jwksUrl);
+      return fetcher.get(jwksUrl);
     } catch (Exception e) {
       throw new IllegalArgumentException(
           "Failed to fetch JWKS from " + jwksUrl + ": " + e.getMessage(), e);
     }
+  }
 
-    JWKSet jwkSet;
+  private static String readFile(String path, String label) {
     try {
-      jwkSet = JWKSet.parse(body);
-    } catch (ParseException e) {
-      throw new IllegalArgumentException("Invalid JWKS document: " + e.getMessage(), e);
+      return java.nio.file.Files.readString(java.nio.file.Path.of(path), StandardCharsets.UTF_8);
+    } catch (java.io.IOException e) {
+      throw new IllegalArgumentException(
+          "Failed to read " + label + " " + path + ": " + e.getMessage(), e);
     }
+  }
+
+  /** Parse either a JWKS document ({"keys":[...]}) or a single JWK object. */
+  static JWKSet parseJwkSetOrKey(String body) {
+    try {
+      Map<String, Object> json = com.nimbusds.jose.util.JSONObjectUtils.parse(body);
+      if (json.containsKey("keys")) {
+        return JWKSet.parse(json);
+      }
+      return new JWKSet(JWK.parse(json));
+    } catch (ParseException e) {
+      throw new IllegalArgumentException("Invalid JWKS/JWK document: " + e.getMessage(), e);
+    }
+  }
+
+  private static JWSVerifier jwksVerifier(
+      JWSAlgorithm alg, JWSHeader header, String body, String sourceLabel)
+      throws JOSEException {
+    if (JWSAlgorithm.Family.HMAC_SHA.contains(alg)) {
+      throw new IllegalArgumentException(
+          sourceLabel
+              + " provided but algorithm is "
+              + alg.getName()
+              + " (use --secret for HMAC)");
+    }
+
+    JWKSet jwkSet = parseJwkSetOrKey(body);
 
     JWKMatcher.Builder matcher =
         new JWKMatcher.Builder().keyUse(com.nimbusds.jose.jwk.KeyUse.SIGNATURE).algorithm(alg);
@@ -534,6 +629,9 @@ public final class JwtSupport {
             new JWKSelector(new JWKMatcher.Builder().keyID(header.getKeyID()).build())
                 .select(jwkSet);
       }
+    }
+    if (matches.isEmpty() && header.getKeyID() == null && jwkSet.getKeys().size() == 1) {
+      matches = jwkSet.getKeys();
     }
     if (matches.isEmpty()) {
       throw new IllegalArgumentException(

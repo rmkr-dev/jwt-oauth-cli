@@ -15,7 +15,7 @@ import static dev.rmkr.jwtoauthcli.cli.CliJson.writeJson;
 @Command(
     name = "verify",
     description =
-        "Verify a JWT signature (HMAC secret or JWKS) with optional claim checks")
+        "Verify a JWT signature (HMAC secret, JWKS URL, or local JWKS file) with optional claim checks")
 public class JwtVerifyCommand implements Callable<Integer> {
 
   @Parameters(index = "0", description = "JWT string")
@@ -29,6 +29,11 @@ public class JwtVerifyCommand implements Callable<Integer> {
 
   @Option(names = "--jwks-url", description = "JWKS URL for RS/ES verification by kid/alg")
   String jwksUrl;
+
+  @Option(
+      names = "--jwks-file",
+      description = "Local JWKS or single public JWK file for RS/PS/ES verification (offline)")
+  String jwksFile;
 
   @Option(names = "--iss", description = "Expected issuer (iss) claim")
   String iss;
@@ -62,6 +67,9 @@ public class JwtVerifyCommand implements Callable<Integer> {
       }
       if (jwksUrl != null && !jwksUrl.isEmpty()) {
         options.put("jwksUrl", jwksUrl);
+      }
+      if (jwksFile != null && !jwksFile.isEmpty()) {
+        options.put("jwksFile", jwksFile);
       }
       if (iss != null && !iss.isEmpty()) {
         options.put("iss", iss);

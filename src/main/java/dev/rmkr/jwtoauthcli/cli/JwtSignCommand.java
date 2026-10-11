@@ -16,7 +16,7 @@ import static dev.rmkr.jwtoauthcli.cli.CliJson.writeJson;
 
 @Command(
     name = "sign",
-    description = "Create an HMAC-signed JWT for local testing (HS256/HS384/HS512)")
+    description = "Create a signed JWT for local testing (HMAC secret or private RSA/EC JWK)")
 public class JwtSignCommand implements Callable<Integer> {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -28,9 +28,15 @@ public class JwtSignCommand implements Callable<Integer> {
   String secret;
 
   @Option(
+      names = "--jwk-file",
+      description = "Private RSA/EC JWK (or JWKS with one private key) for RS*/PS*/ES* signing")
+  String jwkFile;
+
+  @Option(
       names = "--alg",
-      description = "Signing algorithm: HS256, HS384, or HS512 (default: ${DEFAULT-VALUE})",
-      defaultValue = "HS256")
+      description =
+          "Signing algorithm: HS256/HS384/HS512 (default HS256), or RS*/PS*/ES* with --jwk-file"
+              + " (default: the JWK's alg, else RS256 or the curve's ES*)")
   String alg;
 
   @Option(names = "--sub", description = "Subject (sub) claim")
@@ -96,7 +102,14 @@ public class JwtSignCommand implements Callable<Integer> {
       if (hmac != null && !hmac.isEmpty()) {
         options.put("secret", hmac);
       }
-      options.put("alg", alg);
+      if (jwkFile != null && !jwkFile.isEmpty()) {
+        options.put("jwkFile", jwkFile);
+        options.remove("secret");
+      }
+      if (alg != null && !alg.isEmpty()) {
+        options.put("alg", alg);
+        options.put("algExplicit", true);
+      }
       if (sub != null && !sub.isEmpty()) {
         options.put("sub", sub);
       }

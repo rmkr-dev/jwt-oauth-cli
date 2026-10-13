@@ -2,6 +2,7 @@ package dev.rmkr.jwtoauthcli.cli;
 
 import dev.rmkr.jwtoauthcli.oauth.OauthSupport;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 import java.io.PrintWriter;
@@ -28,11 +29,13 @@ public class OauthRefreshCommand implements Callable<Integer> {
   @Option(
       names = "--client-secret",
       description =
-          "Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)")
+          "Client secret (prefer env JWT_OAUTH_CLIENT_SECRET; sent per --client-auth, POST body by default)")
   String clientSecret;
 
   @Option(names = "--scope", description = "Space-separated scopes (optional)")
   String scope;
+
+  @Mixin ClientAuthOptions clientAuth;
 
   @Option(
       names = {"-c", "--compact"},
@@ -58,6 +61,8 @@ public class OauthRefreshCommand implements Callable<Integer> {
       if (scope != null) {
         params.put("scope", scope);
       }
+
+      clientAuth.applyTo(params);
 
       Map<String, Object> result = OauthSupport.refreshToken(params);
       writeJson(System.out, result, compact);

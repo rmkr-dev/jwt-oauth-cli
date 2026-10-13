@@ -11,6 +11,7 @@ import picocli.CommandLine.Command;
       OauthExchangeCommand.class,
       OauthRefreshCommand.class,
       OauthClientCredentialsCommand.class,
+      OauthClientAssertionCommand.class,
       OauthIntrospectCommand.class,
       OauthRevokeCommand.class,
       OauthDeviceCodeCommand.class,

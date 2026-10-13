@@ -2,6 +2,7 @@ package dev.rmkr.jwtoauthcli.cli;
 
 import dev.rmkr.jwtoauthcli.oauth.OauthSupport;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 import java.io.PrintWriter;
@@ -31,7 +32,7 @@ public class OauthExchangeCommand implements Callable<Integer> {
   @Option(
       names = "--client-secret",
       description =
-          "Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)")
+          "Client secret (prefer env JWT_OAUTH_CLIENT_SECRET; sent per --client-auth, POST body by default)")
   String clientSecret;
 
   @Option(names = "--code-verifier", description = "PKCE code_verifier")
@@ -39,6 +40,8 @@ public class OauthExchangeCommand implements Callable<Integer> {
 
   @Option(names = "--grant-type", description = "grant_type", defaultValue = "authorization_code")
   String grantType;
+
+  @Mixin ClientAuthOptions clientAuth;
 
   @Option(
       names = {"-c", "--compact"},
@@ -66,6 +69,8 @@ public class OauthExchangeCommand implements Callable<Integer> {
         params.put("codeVerifier", codeVerifier);
       }
       params.put("grantType", grantType);
+
+      clientAuth.applyTo(params);
 
       Map<String, Object> result = OauthSupport.exchangeCode(params);
       writeJson(System.out, result, compact);

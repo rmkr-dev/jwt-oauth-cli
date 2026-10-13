@@ -2,6 +2,7 @@ package dev.rmkr.jwtoauthcli.cli;
 
 import dev.rmkr.jwtoauthcli.oauth.OauthSupport;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 import java.io.PrintWriter;
@@ -29,7 +30,7 @@ public class OauthDeviceTokenCommand implements Callable<Integer> {
   @Option(
       names = "--client-secret",
       description =
-          "Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)")
+          "Client secret (prefer env JWT_OAUTH_CLIENT_SECRET; sent per --client-auth, POST body by default)")
   String clientSecret;
 
   @Option(
@@ -50,6 +51,8 @@ public class OauthDeviceTokenCommand implements Callable<Integer> {
       defaultValue = "600",
       description = "Give up after this many seconds when --wait is set (default: 600)")
   int maxWaitSeconds;
+
+  @Mixin ClientAuthOptions clientAuth;
 
   @Option(
       names = {"-c", "--compact"},
@@ -72,6 +75,8 @@ public class OauthDeviceTokenCommand implements Callable<Integer> {
       if (secret != null && !secret.isEmpty()) {
         params.put("clientSecret", secret);
       }
+
+      clientAuth.applyTo(params);
 
       int sleepSeconds = interval > 0 ? interval : 5;
       long deadlineNanos = System.nanoTime() + Math.max(0, maxWaitSeconds) * 1_000_000_000L;

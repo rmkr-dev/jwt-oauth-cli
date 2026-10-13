@@ -24,6 +24,13 @@ import java.util.StringJoiner;
  * PKCE generation, refresh-token grant, client-credentials grant,
  * device authorization grant (RFC 8628), token introspection (RFC 7662),
  * token revocation (RFC 7009), OIDC/OAuth metadata discovery, and UserInfo.
+ *
+ * <p>Every form POST that authenticates the client honours the optional params
+ * {@code clientAuth} ({@code basic|post|private_key_jwt|client_secret_jwt}),
+ * {@code clientJwk}/{@code clientJwkFile}, {@code assertionAlg},
+ * {@code assertionAudience}, and {@code assertionLifetimeSeconds}; see
+ * {@link ClientAssertionSupport}. Without {@code clientAuth} the request body is
+ * unchanged from earlier releases.
  */
 public final class OauthSupport {
 
@@ -154,7 +161,9 @@ public final class OauthSupport {
       body.put("code_verifier", codeVerifier);
     }
 
-    return postToken(tokenEndpoint, body, poster, "Token exchange failed");
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, tokenEndpoint, body, authHeaders);
+    return postToken(tokenEndpoint, body, authHeaders, poster, "Token exchange failed");
   }
 
   public static Map<String, Object> generatePkce() {
@@ -217,7 +226,9 @@ public final class OauthSupport {
       body.put("scope", joinScope(scope));
     }
 
-    return postToken(tokenEndpoint, body, poster, "Token refresh failed");
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, tokenEndpoint, body, authHeaders);
+    return postToken(tokenEndpoint, body, authHeaders, poster, "Token refresh failed");
   }
 
 
@@ -229,7 +240,11 @@ public final class OauthSupport {
       throws Exception {
     String tokenEndpoint = requireString(params, "tokenEndpoint");
     String clientId = requireString(params, "clientId");
-    String clientSecret = requireString(params, "clientSecret");
+    // Without an explicit client auth method this grant has always required a secret.
+    String clientSecret =
+        params.get("clientAuth") == null
+            ? requireString(params, "clientSecret")
+            : asNullableString(params.get("clientSecret"));
     Object scope = params.get("scope");
 
     validateUrl(tokenEndpoint, "tokenEndpoint");
@@ -237,12 +252,17 @@ public final class OauthSupport {
     Map<String, String> body = new LinkedHashMap<>();
     body.put("grant_type", "client_credentials");
     body.put("client_id", clientId);
-    body.put("client_secret", clientSecret);
+    if (clientSecret != null && !clientSecret.isEmpty()) {
+      body.put("client_secret", clientSecret);
+    }
     if (scope != null && !(scope instanceof String s && s.isEmpty())) {
       body.put("scope", joinScope(scope));
     }
 
-    return postToken(tokenEndpoint, body, poster, "Client credentials grant failed");
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, tokenEndpoint, body, authHeaders);
+    return postToken(
+        tokenEndpoint, body, authHeaders, poster, "Client credentials grant failed");
   }
 
 
@@ -274,7 +294,9 @@ public final class OauthSupport {
       body.put("token_type_hint", tokenTypeHint);
     }
 
-    return postToken(endpoint, body, poster, "Token introspection failed");
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, endpoint, body, authHeaders);
+    return postToken(endpoint, body, authHeaders, poster, "Token introspection failed");
   }
 
   public static Map<String, Object> revoke(Map<String, Object> params) throws Exception {
@@ -305,10 +327,14 @@ public final class OauthSupport {
       body.put("token_type_hint", tokenTypeHint);
     }
 
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, endpoint, body, authHeaders);
+
     String form = encodeForm(body);
     Map<String, String> headers = new LinkedHashMap<>();
     headers.put("content-type", "application/x-www-form-urlencoded");
     headers.put("accept", "application/json");
+    headers.putAll(authHeaders);
 
     FormPoster.HttpResponse response = poster.post(endpoint, form, headers);
     int status = response.status();
@@ -367,7 +393,9 @@ public final class OauthSupport {
       body.put("client_secret", clientSecret);
     }
 
-    Posted posted = postForm(endpoint, body, poster);
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, endpoint, body, authHeaders);
+    Posted posted = postForm(endpoint, body, authHeaders, poster);
     Map<String, Object> data = posted.data();
     if (!posted.response().ok() || data.get("error") != null) {
       throw new IllegalStateException(
@@ -425,7 +453,9 @@ public final class OauthSupport {
       body.put("client_secret", clientSecret);
     }
 
-    Posted posted = postForm(tokenEndpoint, body, poster);
+    Map<String, String> authHeaders = new LinkedHashMap<>();
+    ClientAssertionSupport.apply(params, tokenEndpoint, body, authHeaders);
+    Posted posted = postForm(tokenEndpoint, body, authHeaders, poster);
     FormPoster.HttpResponse response = posted.response();
     Map<String, Object> data = posted.data();
 
@@ -639,12 +669,14 @@ public final class OauthSupport {
 
   private record Posted(FormPoster.HttpResponse response, Map<String, Object> data) {}
 
-  private static Posted postForm(String url, Map<String, String> body, FormPoster poster)
+  private static Posted postForm(
+      String url, Map<String, String> body, Map<String, String> extraHeaders, FormPoster poster)
       throws Exception {
     String form = encodeForm(body);
     Map<String, String> headers = new LinkedHashMap<>();
     headers.put("content-type", "application/x-www-form-urlencoded");
     headers.put("accept", "application/json");
+    headers.putAll(extraHeaders);
 
     FormPoster.HttpResponse response = poster.post(url, form, headers);
     String text = response.body() == null ? "" : response.body();
@@ -677,12 +709,17 @@ public final class OauthSupport {
   }
 
   private static Map<String, Object> postToken(
-      String tokenEndpoint, Map<String, String> body, FormPoster poster, String failPrefix)
+      String tokenEndpoint,
+      Map<String, String> body,
+      Map<String, String> extraHeaders,
+      FormPoster poster,
+      String failPrefix)
       throws Exception {
     String form = encodeForm(body);
     Map<String, String> headers = new LinkedHashMap<>();
     headers.put("content-type", "application/x-www-form-urlencoded");
     headers.put("accept", "application/json");
+    headers.putAll(extraHeaders);
 
     FormPoster.HttpResponse response = poster.post(tokenEndpoint, form, headers);
     String text = response.body() == null ? "" : response.body();

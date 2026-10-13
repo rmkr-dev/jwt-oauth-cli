@@ -1,7 +1,9 @@
 package dev.rmkr.jwtoauthcli.cli;
 
+import dev.rmkr.jwtoauthcli.oauth.ClientAssertionSupport;
 import dev.rmkr.jwtoauthcli.oauth.OauthSupport;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 import java.io.PrintWriter;
@@ -26,11 +28,13 @@ public class OauthClientCredentialsCommand implements Callable<Integer> {
   @Option(
       names = "--client-secret",
       description =
-          "Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)")
+          "Client secret (prefer env JWT_OAUTH_CLIENT_SECRET; sent per --client-auth, POST body by default)")
   String clientSecret;
 
   @Option(names = "--scope", description = "Space-separated scopes (optional)")
   String scope;
+
+  @Mixin ClientAuthOptions clientAuth;
 
   @Option(
       names = {"-c", "--compact"},
@@ -45,7 +49,10 @@ public class OauthClientCredentialsCommand implements Callable<Integer> {
       if (secret == null || secret.isEmpty()) {
         secret = System.getenv("JWT_OAUTH_CLIENT_SECRET");
       }
-      if (secret == null || secret.isEmpty()) {
+      boolean secretOptional =
+          ClientAssertionSupport.Method.PRIVATE_KEY_JWT
+              == ClientAssertionSupport.Method.parse(clientAuth.clientAuth);
+      if ((secret == null || secret.isEmpty()) && !secretOptional) {
         err.println(
             "clientSecret is required (pass --client-secret or set JWT_OAUTH_CLIENT_SECRET)");
         return 1;
@@ -54,10 +61,14 @@ public class OauthClientCredentialsCommand implements Callable<Integer> {
       Map<String, Object> params = new LinkedHashMap<>();
       params.put("tokenEndpoint", tokenEndpoint);
       params.put("clientId", clientId);
-      params.put("clientSecret", secret);
+      if (secret != null && !secret.isEmpty()) {
+        params.put("clientSecret", secret);
+      }
       if (scope != null) {
         params.put("scope", scope);
       }
+
+      clientAuth.applyTo(params);
 
       Map<String, Object> result = OauthSupport.clientCredentials(params);
       writeJson(System.out, result, compact);

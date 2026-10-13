@@ -2,6 +2,7 @@ package dev.rmkr.jwtoauthcli.cli;
 
 import dev.rmkr.jwtoauthcli.oauth.OauthSupport;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 import java.io.PrintWriter;
@@ -37,8 +38,10 @@ public class OauthIntrospectCommand implements Callable<Integer> {
   @Option(
       names = "--client-secret",
       description =
-          "Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)")
+          "Client secret (prefer env JWT_OAUTH_CLIENT_SECRET; sent per --client-auth, POST body by default)")
   String clientSecret;
+
+  @Mixin ClientAuthOptions clientAuth;
 
   @Option(
       names = {"-c", "--compact"},
@@ -64,6 +67,8 @@ public class OauthIntrospectCommand implements Callable<Integer> {
       if (tokenTypeHint != null && !tokenTypeHint.isEmpty()) {
         params.put("tokenTypeHint", tokenTypeHint);
       }
+
+      clientAuth.applyTo(params);
 
       Map<String, Object> result = OauthSupport.introspect(params);
       writeJson(System.out, result, compact);

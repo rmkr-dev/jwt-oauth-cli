@@ -2,6 +2,7 @@ package dev.rmkr.jwtoauthcli.cli;
 
 import dev.rmkr.jwtoauthcli.oauth.OauthSupport;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 import java.io.PrintWriter;
@@ -32,8 +33,10 @@ public class OauthDeviceCodeCommand implements Callable<Integer> {
   @Option(
       names = "--client-secret",
       description =
-          "Client secret (sent in POST body only; prefer env JWT_OAUTH_CLIENT_SECRET)")
+          "Client secret (prefer env JWT_OAUTH_CLIENT_SECRET; sent per --client-auth, POST body by default)")
   String clientSecret;
+
+  @Mixin ClientAuthOptions clientAuth;
 
   @Option(
       names = {"-c", "--compact"},
@@ -58,6 +61,8 @@ public class OauthDeviceCodeCommand implements Callable<Integer> {
       if (secret != null && !secret.isEmpty()) {
         params.put("clientSecret", secret);
       }
+
+      clientAuth.applyTo(params);
 
       Map<String, Object> result = OauthSupport.deviceAuthorization(params);
       writeJson(System.out, result, compact);

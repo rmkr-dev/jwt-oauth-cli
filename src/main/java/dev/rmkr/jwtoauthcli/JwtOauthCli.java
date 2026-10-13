@@ -8,7 +8,7 @@ import picocli.CommandLine.Command;
 @Command(
     name = "jwt-oauth-cli",
     mixinStandardHelpOptions = true,
-    version = "0.5.0",
+    version = "0.9.0",
     description =
         "Decode/inspect/verify/sign JWTs and run local OAuth helpers (authorize URL, PKCE, code exchange, refresh, client-credentials, device authorization, introspect, revoke)",
     subcommands = {JwtCommands.class, OauthCommands.class})

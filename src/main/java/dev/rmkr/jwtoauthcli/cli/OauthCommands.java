@@ -8,6 +8,7 @@ import picocli.CommandLine.Command;
     subcommands = {
       OauthAuthorizeUrlCommand.class,
       OauthPkceCommand.class,
+      OauthCallbackCommand.class,
       OauthExchangeCommand.class,
       OauthRefreshCommand.class,
       OauthClientCredentialsCommand.class,
